@@ -550,7 +550,7 @@ def print_config_summary() -> None:
         print(f"\n📁 Cache file: {CACHE_FILE_PATH}")
         print(f"   • تأكد من أذونات الكتابة على هذا المسار")
     
-    print(f"{'='=80}\n")
+   print(f"{'='*80}\n")
 
 # ========== عرض الملخص في وضع التصحيح ==========
 if DEBUG_MODE:
