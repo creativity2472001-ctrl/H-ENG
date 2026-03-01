@@ -16,6 +16,7 @@ import psutil
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, status, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, validator
 import uvicorn
 
@@ -30,7 +31,6 @@ from config import (
 LOG_LEVEL = logging.DEBUG if DEBUG_MODE else logging.INFO
 logging.basicConfig(level=LOG_LEVEL, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-# إضافة مستوى TRACE للتسجيل التفصيلي (مع تحذير أمني)
 TRACE_LEVEL = 5
 logging.addLevelName(TRACE_LEVEL, "TRACE")
 
@@ -66,7 +66,6 @@ SUPPORTED_DOMAINS = [
 
 DOMAIN_NAMES = [d["name"] for d in SUPPORTED_DOMAINS]
 
-# إعداد Executor ديناميكي (Thread أو Process)
 CPU_COUNT = multiprocessing.cpu_count()
 WORKER_COUNT = MAX_WORKERS if MAX_WORKERS > 0 else max(2, min(CPU_COUNT * 2, 8))
 
@@ -77,12 +76,10 @@ else:
     MATH_EXECUTOR = ThreadPoolExecutor(max_workers=WORKER_COUNT)
     logger.info(f"Using ThreadPoolExecutor with {WORKER_COUNT} workers")
 
-# Semaphore للتحكم في التزامن على Cache
 CACHE_LOCK = asyncio.Semaphore(10)
 
 
 class LRUCache:
-    """LRU Cache للذاكرة مع TTL وإحصائيات و Lock داخلي"""
     def __init__(self, name: str, capacity: int = 200, ttl: int = 3600):
         self.name = name
         self.cache = {}
@@ -150,7 +147,6 @@ class LRUCache:
 
 
 class ResultCache:
-    """Cache متعدد المستويات للنتائج مع إحصائيات"""
     def __init__(self):
         self.ai_cache = LRUCache(name="AI", capacity=100, ttl=300)
         self.math_cache = LRUCache(name="Math", capacity=200, ttl=600)
@@ -206,7 +202,6 @@ class ResultCache:
 
 
 class ResourceMonitor:
-    """مراقب استخدام الموارد مع تفاصيل ThreadPool"""
     def __init__(self, cpu_threshold: float = 80.0, memory_threshold: float = 80.0):
         self.cpu_threshold = cpu_threshold
         self.memory_threshold = memory_threshold
@@ -236,7 +231,6 @@ class ResourceMonitor:
             }
     
     def get_threadpool_stats(self) -> Dict:
-        """إحصائيات عن ThreadPool"""
         if isinstance(MATH_EXECUTOR, ThreadPoolExecutor):
             return {
                 "type": "thread",
@@ -252,7 +246,6 @@ class ResourceMonitor:
 
 
 class SecureCodeValidator:
-    """التحقق المتقدم من الكود قبل التنفيذ"""
     DANGEROUS_PATTERNS = [
         '__import__', 'eval(', 'exec(', 'compile(',
         'open(', 'file(', 'os.system', 'subprocess',
@@ -594,6 +587,10 @@ app = FastAPI(
     redoc_url="/redoc" if DEBUG_MODE else None,
 )
 
+# ✅ إنشاء مجلد static وربطه
+os.makedirs("static", exist_ok=True)
+app.mount("/", StaticFiles(directory="static", html=True), name="static")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"] if DEBUG_MODE else [],
@@ -741,7 +738,6 @@ async def solve_problem(
             try:
                 loop = asyncio.get_running_loop()
                 
-                # تنفيذ مع timeout وقابلية للإلغاء
                 math_task = asyncio.create_task(
                     app_state.math_engine.execute(
                         code=ai_result["code"],
@@ -1158,7 +1154,9 @@ if __name__ == "__main__":
     print(f"Debug: {DEBUG_MODE}")
     print(f"Executor: {'Process' if USE_PROCESS_POOL else 'Thread'} with {WORKER_COUNT} workers")
     print(f"Max code length: {MAX_CODE_LENGTH}")
+    print(f"Static files: ./static/")
     print(f"API Docs: http://{HOST}:{PORT}/docs")
+    print(f"Web UI: http://{HOST}:{PORT}/")
     print("="*60)
     
     uvicorn.run(
