@@ -602,7 +602,8 @@
             `;
             
             try {
-                const response = await fetch('/solve', {
+                // ✅ الرابط الصحيح مع localhost الكامل
+                const response = await fetch('http://localhost:8000/solve', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
