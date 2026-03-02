@@ -594,6 +594,30 @@ app = FastAPI(
 async def test_post():
     return {"message": "POST is working!"}
 
+# ✅ نقطة اختبار بسيطة
+@app.get("/ping")
+async def ping():
+    return {"status": "ok", "message": "server is running", "time": time.time()}
+
+# ✅ عرض جميع المسارات للتأكد
+@app.get("/debug/routes")
+async def debug_routes():
+    routes = []
+    for route in app.routes:
+        if hasattr(route, "methods"):
+            routes.append({
+                "path": route.path,
+                "methods": list(route.methods)
+            })
+    return {"routes": routes}
+
+# ✅ حل مشكلة 405 - فرض POST فقط على جميع المسارات
+@app.api_route("/solve", methods=["POST"])
+@app.api_route("/solve/with-steps", methods=["POST"])
+@app.api_route("/evaluate", methods=["POST"])
+@app.api_route("/simplify", methods=["POST"])
+@app.api_route("/validate", methods=["POST"])
+
 # ✅ عرض جميع المسارات عند بدء التشغيل
 @app.on_event("startup")
 async def show_routes():
@@ -666,6 +690,9 @@ async def root():
             </div>
             <div class="endpoint">
                 <span class="badge">POST</span> /test - اختبار POST
+            </div>
+            <div class="endpoint">
+                <span class="badge">GET</span> /ping - اختبار الاتصال
             </div>
             
             <div class="stats">
