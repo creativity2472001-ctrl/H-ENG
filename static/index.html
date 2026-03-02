@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>المساعد الهندسي</title>
+    <title>ذكي ماتك - المساعد الهندسي</title>
     <style>
         * {
             margin: 0;
@@ -206,30 +206,79 @@
             color: #333;
         }
         
+        .answer strong {
+            color: #1a2a6c;
+            font-size: 1.1em;
+        }
+        
+        .answer .result-box {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 10px 0;
+            border-right: 4px solid #b21f1f;
+        }
+        
+        .answer .step-item {
+            padding: 8px 15px;
+            margin: 5px 0;
+            background: white;
+            border-radius: 8px;
+            border-right: 3px solid #1a2a6c;
+        }
+        
         .loading {
             text-align: center;
-            padding: 20px;
+            padding: 30px;
             font-size: 1.2em;
             color: #1a2a6c;
         }
         
-        .loading:after {
-            content: "⚡";
-            animation: spin 1s infinite;
+        .loading-spinner {
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #1a2a6c;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 10px;
         }
         
         @keyframes spin {
-            0% { content: "⚡"; }
-            50% { content: "✨"; }
-            100% { content: "⚡"; }
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
         
         .error {
             color: #dc3545;
-            padding: 15px;
+            padding: 20px;
             background: #f8d7da;
-            border-radius: 8px;
+            border-radius: 10px;
             font-size: 1.1em;
+            text-align: center;
+        }
+        
+        .info-box {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 10px 0;
+        }
+        
+        .info-box h3 {
+            color: #1a2a6c;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+        
+        .info-box ul {
+            padding-right: 20px;
+        }
+        
+        .info-box li {
+            margin: 8px 0;
+            color: #555;
         }
         
         /* Responsive */
@@ -262,7 +311,7 @@
 <body>
     <div class="header">
         <div class="logo">
-            <h1>🔧 المساعد الهندسي</h1>
+            <h1>🔧 ذكي ماتك - المساعد الهندسي</h1>
         </div>
         <div class="menu-container">
             <div class="menu-icon" onclick="toggleMenu()">☰</div>
@@ -272,12 +321,12 @@
                     <span>▼</span>
                 </div>
                 <div class="language-options" id="languageOptions">
-                    <div class="lang-option active" onclick="changeLanguage('ar')">🇸🇦 العربية</div>
-                    <div class="lang-option" onclick="changeLanguage('en')">🇬🇧 English</div>
-                    <div class="lang-option" onclick="changeLanguage('tr')">🇹🇷 Türkçe</div>
-                    <div class="lang-option" onclick="changeLanguage('fr')">🇫🇷 Français</div>
-                    <div class="lang-option" onclick="changeLanguage('de')">🇩🇪 Deutsch</div>
-                    <div class="lang-option" onclick="changeLanguage('ru')">🇷🇺 Русский</div>
+                    <div class="lang-option active" onclick="changeLanguage('ar', event)">🇸🇦 العربية</div>
+                    <div class="lang-option" onclick="changeLanguage('en', event)">🇬🇧 English</div>
+                    <div class="lang-option" onclick="changeLanguage('tr', event)">🇹🇷 Türkçe</div>
+                    <div class="lang-option" onclick="changeLanguage('fr', event)">🇫🇷 Français</div>
+                    <div class="lang-option" onclick="changeLanguage('de', event)">🇩🇪 Deutsch</div>
+                    <div class="lang-option" onclick="changeLanguage('ru', event)">🇷🇺 Русский</div>
                 </div>
                 <div class="menu-item" onclick="showHelp()">
                     <span>❓ المساعدة</span>
@@ -285,15 +334,20 @@
                 <div class="menu-item" onclick="showAbout()">
                     <span>ℹ️ عن التطبيق</span>
                 </div>
+                <div class="menu-item" onclick="showExamples()">
+                    <span>📝 أمثلة</span>
+                </div>
             </div>
         </div>
     </div>
     
     <div class="main-content">
-        <h2>اسأل أي سؤال مختص في الهندسة</h2>
+        <h2 id="main-title">اسأل أي سؤال في الهندسة</h2>
         
         <div class="search-container">
-            <input type="text" class="search-input" id="question" placeholder="مثال: كيف يعمل محرك DC؟" onkeypress="handleKeyPress(event)">
+            <input type="text" class="search-input" id="question" 
+                   placeholder="مثال: مشتقة x^2, 2+2, تكامل sin x, قانون أوم" 
+                   onkeypress="handleKeyPress(event)">
             <button class="search-btn" onclick="ask()">➡️</button>
         </div>
         
@@ -301,8 +355,96 @@
     </div>
     
     <script>
-        let currentQuestionId = null;
         let currentLanguage = 'ar';
+        
+        // ترجمة الواجهة حسب اللغة
+        const translations = {
+            ar: {
+                title: 'ذكي ماتك - المساعد الهندسي',
+                mainTitle: 'اسأل أي سؤال في الهندسة',
+                placeholder: 'مثال: مشتقة x^2, 2+2, تكامل sin x, قانون أوم',
+                help: '❓ المساعدة',
+                about: 'ℹ️ عن التطبيق',
+                examples: '📝 أمثلة',
+                result: 'النتيجة',
+                steps: 'خطوات الحل',
+                error: 'حدث خطأ',
+                connectionError: '❌ لا يمكن الاتصال بالخادم'
+            },
+            en: {
+                title: 'Zaky Matik - Engineering Assistant',
+                mainTitle: 'Ask any engineering question',
+                placeholder: 'Example: derivative of x^2, 2+2, integral of sin x, Ohm\'s law',
+                help: '❓ Help',
+                about: 'ℹ️ About',
+                examples: '📝 Examples',
+                result: 'Result',
+                steps: 'Steps',
+                error: 'Error occurred',
+                connectionError: '❌ Cannot connect to server'
+            },
+            tr: {
+                title: 'Zaky Matik - Mühendislik Asistanı',
+                mainTitle: 'Herhangi bir mühendislik sorusu sorun',
+                placeholder: 'Örnek: x^2 türevi, 2+2, sin x integrali, Ohm yasası',
+                help: '❓ Yardım',
+                about: 'ℹ️ Hakkında',
+                examples: '📝 Örnekler',
+                result: 'Sonuç',
+                steps: 'Adımlar',
+                error: 'Hata oluştu',
+                connectionError: '❌ Sunucuya bağlanılamıyor'
+            },
+            fr: {
+                title: 'Zaky Matik - Assistant d\'ingénierie',
+                mainTitle: 'Posez n\'importe quelle question d\'ingénierie',
+                placeholder: 'Exemple: dérivée de x^2, 2+2, intégrale de sin x, loi d\'Ohm',
+                help: '❓ Aide',
+                about: 'ℹ️ À propos',
+                examples: '📝 Exemples',
+                result: 'Résultat',
+                steps: 'Étapes',
+                error: 'Erreur',
+                connectionError: '❌ Impossible de se connecter au serveur'
+            },
+            de: {
+                title: 'Zaky Matik - Ingenieurassistent',
+                mainTitle: 'Stellen Sie eine beliebige technische Frage',
+                placeholder: 'Beispiel: Ableitung von x^2, 2+2, Integral von sin x, Ohmsches Gesetz',
+                help: '❓ Hilfe',
+                about: 'ℹ️ Über',
+                examples: '📝 Beispiele',
+                result: 'Ergebnis',
+                steps: 'Schritte',
+                error: 'Fehler',
+                connectionError: '❌ Keine Verbindung zum Server'
+            },
+            ru: {
+                title: 'Zaky Matik - Инженерный помощник',
+                mainTitle: 'Задайте любой инженерный вопрос',
+                placeholder: 'Пример: производная x^2, 2+2, интеграл sin x, закон Ома',
+                help: '❓ Помощь',
+                about: 'ℹ️ О приложении',
+                examples: '📝 Примеры',
+                result: 'Результат',
+                steps: 'Шаги',
+                error: 'Ошибка',
+                connectionError: '❌ Нет подключения к серверу'
+            }
+        };
+        
+        function updateUILanguage() {
+            const t = translations[currentLanguage] || translations.ar;
+            document.title = t.title;
+            document.getElementById('main-title').textContent = t.mainTitle;
+            document.getElementById('question').placeholder = t.placeholder;
+            
+            // تحديث نص القائمة
+            const menuItems = document.querySelectorAll('.menu-item');
+            if (menuItems[1]) menuItems[1].innerHTML = `<span>${t.help}</span>`;
+            if (menuItems[2]) menuItems[2].innerHTML = `<span>${t.about}</span>`;
+            if (menuItems[3]) menuItems[3].innerHTML = `<span>${t.examples}</span>`;
+        }
         
         function handleKeyPress(event) {
             if (event.key === 'Enter') {
@@ -319,7 +461,7 @@
             document.getElementById('languageOptions').classList.toggle('show');
         }
         
-        function changeLanguage(lang) {
+        function changeLanguage(lang, event) {
             currentLanguage = lang;
             
             // تحديث النشط
@@ -328,57 +470,72 @@
             });
             event.target.classList.add('active');
             
+            // تحديث واجهة المستخدم
+            updateUILanguage();
+            
             // إخفاء القوائم
             document.getElementById('languageOptions').classList.remove('show');
             document.getElementById('dropdownMenu').classList.remove('show');
-            
-            // يمكن إضافة ترجمة الواجهة هنا لاحقاً
         }
         
         function showHelp() {
             document.getElementById('dropdownMenu').classList.remove('show');
+            const t = translations[currentLanguage];
             
             const resultDiv = document.getElementById('result');
             resultDiv.style.display = 'block';
             resultDiv.innerHTML = `
-                <div class="answer">
-                    <h3>❓ كيفية استخدام المساعد الهندسي</h3>
-                    <p>• اكتب سؤالك في مربع النص ثم اضغط على زر الإرسال أو Enter</p>
-                    <p>• يمكنك السؤال عن مواضيع الهندسة المختلفة:</p>
+                <div class="info-box">
+                    <h3>❓ ${t.help}</h3>
                     <ul>
-                        <li>ميكاترونكس</li>
-                        <li>ميكانيكا</li>
-                        <li>كهرباء وإلكترونيات</li>
-                        <li>محركات وتحكم</li>
-                        <li>رياضيات وفيزياء</li>
-                        <li>PLC وأنظمة أتمتة</li>
+                        <li>• اكتب سؤالك في مربع النص ثم اضغط Enter</li>
+                        <li>• اسأل في مجالات: ميكاترونكس، ميكانيكا، كهرباء، إلكترونيات، محركات، PLC</li>
+                        <li>• مثال: "مشتقة x^2"</li>
+                        <li>• مثال: "2+2"</li>
+                        <li>• مثال: "تكامل sin x"</li>
+                        <li>• مثال: "قانون أوم"</li>
                     </ul>
-                    <p>• التطبيق يدعم 6 لغات: العربية، الإنجليزية، التركية، الفرنسية، الألمانية، الروسية</p>
-                    <p>• يمكنك تقييم الإجابة باستخدام 👍 أو 👎</p>
                 </div>
             `;
         }
         
         function showAbout() {
             document.getElementById('dropdownMenu').classList.remove('show');
+            const t = translations[currentLanguage];
             
             const resultDiv = document.getElementById('result');
             resultDiv.style.display = 'block';
             resultDiv.innerHTML = `
-                <div class="answer">
-                    <h3>ℹ️ عن المساعد الهندسي</h3>
-                    <p><strong>الإصدار:</strong> 5.1</p>
-                    <p><strong>التخصص:</strong> الهندسة بجميع فروعها</p>
+                <div class="info-box">
+                    <h3>ℹ️ ${t.about}</h3>
+                    <p><strong>الإصدار:</strong> 6.4</p>
+                    <p><strong>المحرك:</strong> ذكي ماتك v3.2</p>
                     <p><strong>المميزات:</strong></p>
                     <ul>
-                        <li>ذاكرة دائمة تحفظ جميع الأسئلة والأجوبة</li>
-                        <li>7 نماذج ذكاء اصطناعي تعمل خلف الكواليس</li>
-                        <li>دعم 6 لغات مختلفة</li>
-                        <li>تقييم الإجابات لتحسين الجودة</li>
-                        <li>اقتراحات لأسئلة مشابهة</li>
+                        <li>تحويل الأسئلة النصية إلى كود SymPy</li>
+                        <li>تنفيذ دقيق مع Timeout آمن</li>
+                        <li>عرض خطوات الحل كاملة</li>
+                        <li>دعم 6 لغات</li>
+                        <li>مراقبة الأداء والموارد</li>
                     </ul>
-                    <p><strong>اللغات المدعومة:</strong> العربية، الإنجليزية، التركية، الفرنسية، الألمانية، الروسية</p>
-                    <p><strong>تم التطوير:</strong> بواسطة فريق ميكاترونكس</p>
+                </div>
+            `;
+        }
+        
+        function showExamples() {
+            document.getElementById('dropdownMenu').classList.remove('show');
+            
+            const resultDiv = document.getElementById('result');
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = `
+                <div class="info-box">
+                    <h3>📝 أمثلة للأسئلة</h3>
+                    <div class="step-item">• مشتقة x^2</div>
+                    <div class="step-item">• تكامل sin x</div>
+                    <div class="step-item">• حل 2x + 5 = 13</div>
+                    <div class="step-item">• القوة إذا الكتلة 10 والتسارع 9.8</div>
+                    <div class="step-item">• الجهد إذا التيار 2 والمقاومة 100</div>
+                    <div class="step-item">• 2+2</div>
                 </div>
             `;
         }
@@ -386,6 +543,7 @@
         async function ask() {
             const question = document.getElementById('question').value.trim();
             const resultDiv = document.getElementById('result');
+            const t = translations[currentLanguage];
             
             if (!question) {
                 alert('الرجاء كتابة سؤال');
@@ -393,35 +551,69 @@
             }
             
             resultDiv.style.display = 'block';
-            resultDiv.innerHTML = '<div class="loading"></div>';
+            resultDiv.innerHTML = `
+                <div class="loading">
+                    <div class="loading-spinner"></div>
+                    <div>جاري المعالجة...</div>
+                </div>
+            `;
             
             try {
-                const response = await fetch('/api/ask', {
+                // ✅ الرابط الصحيح: /solve
+                const response = await fetch('/solve', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({ 
                         question: question,
-                        language: currentLanguage 
+                        domain: 'general',
+                        include_steps: true,
+                        use_ai_assist: true
                     })
                 });
                 
                 const data = await response.json();
                 
-                if (data.answer) {
-                    // عرض الإجابة فقط بدون أي معلومات إضافية
-                    resultDiv.innerHTML = `<div class="answer">${data.answer}</div>`;
+                if (data.success) {
+                    // عرض النتيجة بشكل جميل
+                    let html = `<div class="answer">`;
                     
-                    // إذا كان هناك معرف للسؤال، نخزنه للتقييم
-                    if (data.question_id) {
-                        currentQuestionId = data.question_id;
+                    // النتيجة الرئيسية
+                    html += `<div class="result-box">`;
+                    html += `<strong>${t.result}:</strong> ${data.result || 'تم بنجاح'}`;
+                    html += `</div>`;
+                    
+                    // خطوات الحل
+                    if (data.steps && data.steps.length > 0) {
+                        html += `<br><strong>${t.steps}:</strong><br>`;
+                        data.steps.forEach((step, index) => {
+                            html += `<div class="step-item">`;
+                            html += `${index + 1}. ${step.text || step}`;
+                            if (step.latex) {
+                                html += `<br><small>${step.latex}</small>`;
+                            }
+                            html += `</div>`;
+                        });
                     }
+                    
+                    // معلومات إضافية
+                    if (data.model) {
+                        html += `<br><small>🔄 باستخدام: ${data.model}</small>`;
+                    }
+                    if (data.execution_time) {
+                        html += `<br><small>⏱️ الوقت: ${data.execution_time.toFixed(2)} ثانية</small>`;
+                    }
+                    
+                    html += `</div>`;
+                    resultDiv.innerHTML = html;
+                    
                 } else {
-                    resultDiv.innerHTML = `<div class="error">${data.error || 'حدث خطأ'}</div>`;
+                    resultDiv.innerHTML = `<div class="error">❌ ${data.error || t.error}</div>`;
                 }
             } catch (error) {
-                resultDiv.innerHTML = `<div class="error">❌ لا يمكن الاتصال بالخادم</div>`;
+                console.error('Error:', error);
+                resultDiv.innerHTML = `<div class="error">${t.connectionError}</div>`;
             }
         }
         
@@ -432,6 +624,11 @@
                 document.getElementById('languageOptions').classList.remove('show');
             }
         }
+        
+        // تهيئة الترجمة عند تحميل الصفحة
+        document.addEventListener('DOMContentLoaded', function() {
+            updateUILanguage();
+        });
     </script>
 </body>
 </html>
