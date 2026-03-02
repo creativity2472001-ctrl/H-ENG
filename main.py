@@ -4,7 +4,6 @@ import json
 import logging
 import uuid
 from typing import Optional, Dict, Any, List, Callable, Tuple
-from typing import Optional, Dict, Any, List, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from functools import wraps
@@ -20,6 +19,8 @@ from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse, Red
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, validator
 import uvicorn
+
+print("✅ تم تحميل main.py بنجاح")
 
 from ai_engine import AIEngine
 from math_engine import MathEngine, ExecutionStatus, MathExpressionType
@@ -588,6 +589,26 @@ app = FastAPI(
     redoc_url="/redoc" if DEBUG_MODE else None,
 )
 
+# ✅ إضافة مسار اختبار للتأكد من أن POST يعمل
+@app.post("/test")
+async def test_post():
+    return {"message": "POST is working!"}
+
+# ✅ عرض جميع المسارات عند بدء التشغيل
+@app.on_event("startup")
+async def show_routes():
+    print("\n" + "="*60)
+    print("📋 المسارات المتاحة:")
+    routes_found = False
+    for route in app.routes:
+        if hasattr(route, "methods") and route.path not in ["/", "/favicon.ico"]:
+            methods = ", ".join(list(route.methods))
+            print(f"   {methods} {route.path}")
+            routes_found = True
+    if not routes_found:
+        print("   ❌ لا توجد مسارات!")
+    print("="*60 + "\n")
+
 # ✅ إنشاء مجلد static وربطه
 os.makedirs("static", exist_ok=True)
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
@@ -642,6 +663,9 @@ async def root():
             </div>
             <div class="endpoint">
                 <span class="badge">GET</span> /health - فحص صحة النظام
+            </div>
+            <div class="endpoint">
+                <span class="badge">POST</span> /test - اختبار POST
             </div>
             
             <div class="stats">
