@@ -21,7 +21,7 @@
         
         /* Header */
         .header {
-            background: linear-gradient(135deg, #1a2a6c, #b21f1f);
+            background: black;
             color: white;
             padding: 15px 30px;
             display: flex;
@@ -50,6 +50,7 @@
             justify-content: center;
             border-radius: 50%;
             transition: background 0.3s;
+            color: white;
         }
         
         .menu-icon:hover {
@@ -68,6 +69,7 @@
             display: none;
             z-index: 1000;
             overflow: hidden;
+            border: 1px solid #eee;
         }
         
         .dropdown-menu.show {
@@ -117,7 +119,7 @@
         }
         
         .lang-option.active {
-            background: #1a2a6c;
+            background: black;
             color: white;
         }
         
@@ -130,12 +132,55 @@
             justify-content: center;
             padding: 40px 20px;
             text-align: center;
+            background: white;
         }
         
         .main-content h2 {
             font-size: 2.5em;
             color: #333;
             margin-bottom: 30px;
+        }
+        
+        /* Math Keyboard */
+        .math-keyboard {
+            width: 100%;
+            max-width: 800px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 60px;
+            border: 1px solid #e0e0e0;
+        }
+        
+        .math-btn {
+            background: black;
+            color: white;
+            border: none;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            font-size: 1.3em;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.2s, box-shadow 0.2s;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        
+        .math-btn:hover {
+            transform: scale(1.1);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+        
+        .math-btn.wide {
+            width: auto;
+            padding: 0 20px;
+            border-radius: 30px;
         }
         
         .search-container {
@@ -147,7 +192,8 @@
             box-shadow: 0 5px 20px rgba(0,0,0,0.1);
             display: flex;
             align-items: center;
-            border: 1px solid #e0e0e0;
+            border: 2px solid black;
+            margin-bottom: 20px;
         }
         
         .search-input {
@@ -197,6 +243,7 @@
             text-align: right;
             box-shadow: 0 5px 20px rgba(0,0,0,0.1);
             display: none;
+            border: 1px solid #e0e0e0;
         }
         
         .answer {
@@ -207,7 +254,7 @@
         }
         
         .answer strong {
-            color: #1a2a6c;
+            color: black;
             font-size: 1.1em;
         }
         
@@ -216,7 +263,7 @@
             padding: 15px;
             border-radius: 10px;
             margin: 10px 0;
-            border-right: 4px solid #b21f1f;
+            border-right: 4px solid black;
         }
         
         .answer .step-item {
@@ -224,14 +271,14 @@
             margin: 5px 0;
             background: white;
             border-radius: 8px;
-            border-right: 3px solid #1a2a6c;
+            border-right: 3px solid black;
         }
         
         .loading {
             text-align: center;
             padding: 30px;
             font-size: 1.2em;
-            color: #1a2a6c;
+            color: black;
         }
         
         .loading-spinner {
@@ -239,7 +286,7 @@
             width: 40px;
             height: 40px;
             border: 4px solid #f3f3f3;
-            border-top: 4px solid #1a2a6c;
+            border-top: 4px solid black;
             border-radius: 50%;
             animation: spin 1s linear infinite;
             margin-bottom: 10px;
@@ -267,7 +314,7 @@
         }
         
         .info-box h3 {
-            color: #1a2a6c;
+            color: black;
             margin-bottom: 15px;
             font-size: 1.3em;
         }
@@ -305,13 +352,23 @@
                 height: 50px;
                 font-size: 1.2em;
             }
+            
+            .math-keyboard {
+                gap: 5px;
+            }
+            
+            .math-btn {
+                width: 40px;
+                height: 40px;
+                font-size: 1.1em;
+            }
         }
     </style>
 </head>
 <body>
     <div class="header">
         <div class="logo">
-            <h1>🔧 ذكي ماتك - المساعد الهندسي</h1>
+            <h1>🔧 ذكي ماتك</h1>
         </div>
         <div class="menu-container">
             <div class="menu-icon" onclick="toggleMenu()">☰</div>
@@ -344,6 +401,29 @@
     <div class="main-content">
         <h2 id="main-title">اسأل أي سؤال في الهندسة</h2>
         
+        <!-- لوحة المفاتيح الرياضية -->
+        <div class="math-keyboard">
+            <button class="math-btn" onclick="insertSymbol('x')">x</button>
+            <button class="math-btn" onclick="insertSymbol('y')">y</button>
+            <button class="math-btn" onclick="insertSymbol('z')">z</button>
+            <button class="math-btn" onclick="insertSymbol('^')">^</button>
+            <button class="math-btn" onclick="insertSymbol('√')">√</button>
+            <button class="math-btn" onclick="insertSymbol('∫')">∫</button>
+            <button class="math-btn" onclick="insertSymbol('∂')">∂</button>
+            <button class="math-btn" onclick="insertSymbol('π')">π</button>
+            <button class="math-btn" onclick="insertSymbol('∞')">∞</button>
+            <button class="math-btn" onclick="insertSymbol('∑')">∑</button>
+            <button class="math-btn" onclick="insertSymbol('∏')">∏</button>
+            <button class="math-btn" onclick="insertSymbol('sin(')">sin</button>
+            <button class="math-btn" onclick="insertSymbol('cos(')">cos</button>
+            <button class="math-btn" onclick="insertSymbol('tan(')">tan</button>
+            <button class="math-btn" onclick="insertSymbol('ln(')">ln</button>
+            <button class="math-btn" onclick="insertSymbol('exp(')">exp</button>
+            <button class="math-btn" onclick="insertSymbol('(')">(</button>
+            <button class="math-btn" onclick="insertSymbol(')')">)</button>
+            <button class="math-btn wide" onclick="clearInput()">مسح</button>
+        </div>
+        
         <div class="search-container">
             <input type="text" class="search-input" id="question" 
                    placeholder="مثال: مشتقة x^2, 2+2, تكامل sin x, قانون أوم" 
@@ -369,7 +449,10 @@
                 result: 'النتيجة',
                 steps: 'خطوات الحل',
                 error: 'حدث خطأ',
-                connectionError: '❌ لا يمكن الاتصال بالخادم'
+                connectionError: '❌ لا يمكن الاتصال بالخادم',
+                using: 'باستخدام',
+                time: 'الوقت',
+                clear: 'مسح'
             },
             en: {
                 title: 'Zaky Matik - Engineering Assistant',
@@ -380,56 +463,11 @@
                 examples: '📝 Examples',
                 result: 'Result',
                 steps: 'Steps',
-                error: 'Error occurred',
-                connectionError: '❌ Cannot connect to server'
-            },
-            tr: {
-                title: 'Zaky Matik - Mühendislik Asistanı',
-                mainTitle: 'Herhangi bir mühendislik sorusu sorun',
-                placeholder: 'Örnek: x^2 türevi, 2+2, sin x integrali, Ohm yasası',
-                help: '❓ Yardım',
-                about: 'ℹ️ Hakkında',
-                examples: '📝 Örnekler',
-                result: 'Sonuç',
-                steps: 'Adımlar',
-                error: 'Hata oluştu',
-                connectionError: '❌ Sunucuya bağlanılamıyor'
-            },
-            fr: {
-                title: 'Zaky Matik - Assistant d\'ingénierie',
-                mainTitle: 'Posez n\'importe quelle question d\'ingénierie',
-                placeholder: 'Exemple: dérivée de x^2, 2+2, intégrale de sin x, loi d\'Ohm',
-                help: '❓ Aide',
-                about: 'ℹ️ À propos',
-                examples: '📝 Exemples',
-                result: 'Résultat',
-                steps: 'Étapes',
-                error: 'Erreur',
-                connectionError: '❌ Impossible de se connecter au serveur'
-            },
-            de: {
-                title: 'Zaky Matik - Ingenieurassistent',
-                mainTitle: 'Stellen Sie eine beliebige technische Frage',
-                placeholder: 'Beispiel: Ableitung von x^2, 2+2, Integral von sin x, Ohmsches Gesetz',
-                help: '❓ Hilfe',
-                about: 'ℹ️ Über',
-                examples: '📝 Beispiele',
-                result: 'Ergebnis',
-                steps: 'Schritte',
-                error: 'Fehler',
-                connectionError: '❌ Keine Verbindung zum Server'
-            },
-            ru: {
-                title: 'Zaky Matik - Инженерный помощник',
-                mainTitle: 'Задайте любой инженерный вопрос',
-                placeholder: 'Пример: производная x^2, 2+2, интеграл sin x, закон Ома',
-                help: '❓ Помощь',
-                about: 'ℹ️ О приложении',
-                examples: '📝 Примеры',
-                result: 'Результат',
-                steps: 'Шаги',
-                error: 'Ошибка',
-                connectionError: '❌ Нет подключения к серверу'
+                error: 'Error',
+                connectionError: '❌ Cannot connect to server',
+                using: 'Using',
+                time: 'Time',
+                clear: 'Clear'
             }
         };
         
@@ -438,12 +476,22 @@
             document.title = t.title;
             document.getElementById('main-title').textContent = t.mainTitle;
             document.getElementById('question').placeholder = t.placeholder;
+        }
+        
+        function insertSymbol(symbol) {
+            const input = document.getElementById('question');
+            const start = input.selectionStart;
+            const end = input.selectionEnd;
+            const text = input.value;
             
-            // تحديث نص القائمة
-            const menuItems = document.querySelectorAll('.menu-item');
-            if (menuItems[1]) menuItems[1].innerHTML = `<span>${t.help}</span>`;
-            if (menuItems[2]) menuItems[2].innerHTML = `<span>${t.about}</span>`;
-            if (menuItems[3]) menuItems[3].innerHTML = `<span>${t.examples}</span>`;
+            input.value = text.substring(0, start) + symbol + text.substring(end);
+            input.focus();
+            input.setSelectionRange(start + symbol.length, start + symbol.length);
+        }
+        
+        function clearInput() {
+            document.getElementById('question').value = '';
+            document.getElementById('question').focus();
         }
         
         function handleKeyPress(event) {
@@ -464,16 +512,13 @@
         function changeLanguage(lang, event) {
             currentLanguage = lang;
             
-            // تحديث النشط
             document.querySelectorAll('.lang-option').forEach(opt => {
                 opt.classList.remove('active');
             });
             event.target.classList.add('active');
             
-            // تحديث واجهة المستخدم
             updateUILanguage();
             
-            // إخفاء القوائم
             document.getElementById('languageOptions').classList.remove('show');
             document.getElementById('dropdownMenu').classList.remove('show');
         }
@@ -488,12 +533,12 @@
                 <div class="info-box">
                     <h3>❓ ${t.help}</h3>
                     <ul>
-                        <li>• اكتب سؤالك في مربع النص ثم اضغط Enter</li>
-                        <li>• اسأل في مجالات: ميكاترونكس، ميكانيكا، كهرباء، إلكترونيات، محركات، PLC</li>
+                        <li>• اكتب سؤالك أو استخدم الأزرار الرياضية</li>
+                        <li>• اضغط Enter أو السهم الأسود للإرسال</li>
+                        <li>• مجالات: ميكاترونكس، ميكانيكا، كهرباء، رياضيات</li>
                         <li>• مثال: "مشتقة x^2"</li>
                         <li>• مثال: "2+2"</li>
                         <li>• مثال: "تكامل sin x"</li>
-                        <li>• مثال: "قانون أوم"</li>
                     </ul>
                 </div>
             `;
@@ -501,22 +546,20 @@
         
         function showAbout() {
             document.getElementById('dropdownMenu').classList.remove('show');
-            const t = translations[currentLanguage];
             
             const resultDiv = document.getElementById('result');
             resultDiv.style.display = 'block';
             resultDiv.innerHTML = `
                 <div class="info-box">
-                    <h3>ℹ️ ${t.about}</h3>
+                    <h3>ℹ️ عن التطبيق</h3>
                     <p><strong>الإصدار:</strong> 6.4</p>
                     <p><strong>المحرك:</strong> ذكي ماتك v3.2</p>
                     <p><strong>المميزات:</strong></p>
                     <ul>
-                        <li>تحويل الأسئلة النصية إلى كود SymPy</li>
-                        <li>تنفيذ دقيق مع Timeout آمن</li>
+                        <li>لوحة مفاتيح رياضية متكاملة</li>
+                        <li>ترجمة فورية للأسئلة</li>
                         <li>عرض خطوات الحل كاملة</li>
                         <li>دعم 6 لغات</li>
-                        <li>مراقبة الأداء والموارد</li>
                     </ul>
                 </div>
             `;
@@ -559,7 +602,6 @@
             `;
             
             try {
-                // ✅ الرابط الصحيح: /solve
                 const response = await fetch('/solve', {
                     method: 'POST',
                     headers: {
@@ -576,15 +618,12 @@
                 const data = await response.json();
                 
                 if (data.success) {
-                    // عرض النتيجة بشكل جميل
                     let html = `<div class="answer">`;
                     
-                    // النتيجة الرئيسية
                     html += `<div class="result-box">`;
                     html += `<strong>${t.result}:</strong> ${data.result || 'تم بنجاح'}`;
                     html += `</div>`;
                     
-                    // خطوات الحل
                     if (data.steps && data.steps.length > 0) {
                         html += `<br><strong>${t.steps}:</strong><br>`;
                         data.steps.forEach((step, index) => {
@@ -597,12 +636,11 @@
                         });
                     }
                     
-                    // معلومات إضافية
                     if (data.model) {
-                        html += `<br><small>🔄 باستخدام: ${data.model}</small>`;
+                        html += `<br><small>🔄 ${t.using}: ${data.model}</small>`;
                     }
                     if (data.execution_time) {
-                        html += `<br><small>⏱️ الوقت: ${data.execution_time.toFixed(2)} ثانية</small>`;
+                        html += `<br><small>⏱️ ${t.time}: ${data.execution_time.toFixed(2)} ثانية</small>`;
                     }
                     
                     html += `</div>`;
@@ -612,12 +650,10 @@
                     resultDiv.innerHTML = `<div class="error">❌ ${data.error || t.error}</div>`;
                 }
             } catch (error) {
-                console.error('Error:', error);
                 resultDiv.innerHTML = `<div class="error">${t.connectionError}</div>`;
             }
         }
         
-        // إغلاق القائمة عند النقر خارجها
         window.onclick = function(event) {
             if (!event.target.closest('.menu-container')) {
                 document.getElementById('dropdownMenu').classList.remove('show');
@@ -625,7 +661,6 @@
             }
         }
         
-        // تهيئة الترجمة عند تحميل الصفحة
         document.addEventListener('DOMContentLoaded', function() {
             updateUILanguage();
         });
