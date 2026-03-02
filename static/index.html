@@ -584,11 +584,22 @@
         }
         
         async function ask() {
-            const question = document.getElementById('question').value.trim();
+            // --- منطقة التشخيص ---
+            console.log("1. دالة ask() بدأت");
+
+            const questionInput = document.getElementById('question');
+            if (!questionInput) {
+                console.error("خطأ فادح: لم يتم العثور على حقل الإدخال 'question'");
+                return;
+            }
+            const question = questionInput.value.trim();
+            console.log("2. السؤال الذي تم التقاطه:", question);
+
             const resultDiv = document.getElementById('result');
             const t = translations[currentLanguage];
             
             if (!question) {
+                console.log("3. السؤال فارغ، تم إيقاف التنفيذ.");
                 alert('الرجاء كتابة سؤال');
                 return;
             }
@@ -600,25 +611,35 @@
                     <div>جاري المعالجة...</div>
                 </div>
             `;
-            
+            console.log("4. تم عرض شاشة التحميل");
+
             try {
-                // ✅✅✅ هذا هو السطر الذي تم إصلاحه ✅✅✅
-                const response = await fetch('http://127.0.0.1:8000/solve', {
+                const url = 'http://127.0.0.1:8000/solve';
+                console.log("5. سيتم إرسال طلب POST إلى:", url);
+
+                const bodyPayload = { 
+                    question: question,
+                    domain: 'general',
+                    include_steps: true,
+                    use_ai_assist: true
+                };
+                console.log("6. محتوى الطلب (Body):", JSON.stringify(bodyPayload));
+
+                const response = await fetch(url, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ 
-                        question: question,
-                        domain: 'general',
-                        include_steps: true,
-                        use_ai_assist: true
-                    })
+                    body: JSON.stringify(bodyPayload)
                 });
                 
+                console.log("7. تم استلام رد من الخادم. الحالة:", response.status);
+
                 const data = await response.json();
+                console.log("8. تم تحويل الرد إلى JSON:", data);
                 
                 if (data.success) {
+                    console.log("9. الرد ناجح، سيتم عرض النتائج.");
                     let html = `<div class="answer">`;
                     
                     html += `<div class="result-box">`;
@@ -641,17 +662,19 @@
                         html += `<br><small>🔄 $</LaTex>{t.using}: <LaTex>${data.model}</small>`;
                     }
                     if (data.execution_time) {
-                        html += `<br><small>⏱️ $</LaTex>{t.time}: <LaTex>${data.execution_time.toFixed(2)} ثانية</small>`;
+                        html += `<br><small>⏱️ $</LaTex>{t.time}: ${data.execution_time.toFixed(2)} ثانية</small>`;
                     }
                     
                     html += `</div>`;
                     resultDiv.innerHTML = html;
                     
                 } else {
-                    resultDiv.innerHTML = `<div class="error">❌ $</LaTex>{data.error || t.error}</div>`;
+                    console.error("9. الخادم أرجع رد خطأ:", data.error);
+                    resultDiv.innerHTML = `<div class="error">❌ ${data.error || t.error}</div>`;
                 }
             } catch (error) {
-                resultDiv.innerHTML = `<div class="error">${t.connectionError}</div>`;
+                console.error("10. حدث خطأ فادح في الشبكة أو في دالة fetch:", error);
+                resultDiv.innerHTML = `<div class="error">${t.connectionError} (انظر الـ Console لمزيد من التفاصيل)</div>`;
             }
         }
         
