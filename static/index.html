@@ -602,7 +602,7 @@
             `;
             
             try {
-                // ✅ الرابط الصحيح - 127.0.0.1 بدل localhost
+                // ✅✅✅ هذا هو السطر الذي تم إصلاحه ✅✅✅
                 const response = await fetch('http://127.0.0.1:8000/solve', {
                     method: 'POST',
                     headers: {
@@ -622,33 +622,33 @@
                     let html = `<div class="answer">`;
                     
                     html += `<div class="result-box">`;
-                    html += `<strong>${t.result}:</strong> ${data.result || 'تم بنجاح'}`;
+                    html += `<strong>${t.result}:</strong> <LaTex>${data.result || 'تم بنجاح'}`;
                     html += `</div>`;
                     
                     if (data.steps && data.steps.length > 0) {
-                        html += `<br><strong>${t.steps}:</strong><br>`;
+                        html += `<br><strong>$</LaTex>{t.steps}:</strong><br>`;
                         data.steps.forEach((step, index) => {
                             html += `<div class="step-item">`;
-                            html += `${index + 1}. ${step.text || step}`;
+                            html += `<LaTex>${index + 1}. $</LaTex>{step.text || step}`;
                             if (step.latex) {
-                                html += `<br><small>${step.latex}</small>`;
+                                html += `<br><small><LaTex>${step.latex}</small>`;
                             }
                             html += `</div>`;
                         });
                     }
                     
                     if (data.model) {
-                        html += `<br><small>🔄 ${t.using}: ${data.model}</small>`;
+                        html += `<br><small>🔄 $</LaTex>{t.using}: <LaTex>${data.model}</small>`;
                     }
                     if (data.execution_time) {
-                        html += `<br><small>⏱️ ${t.time}: ${data.execution_time.toFixed(2)} ثانية</small>`;
+                        html += `<br><small>⏱️ $</LaTex>{t.time}: <LaTex>${data.execution_time.toFixed(2)} ثانية</small>`;
                     }
                     
                     html += `</div>`;
                     resultDiv.innerHTML = html;
                     
                 } else {
-                    resultDiv.innerHTML = `<div class="error">❌ ${data.error || t.error}</div>`;
+                    resultDiv.innerHTML = `<div class="error">❌ $</LaTex>{data.error || t.error}</div>`;
                 }
             } catch (error) {
                 resultDiv.innerHTML = `<div class="error">${t.connectionError}</div>`;
