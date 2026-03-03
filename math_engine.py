@@ -143,11 +143,12 @@ class MathEngine:
         except Exception as e:
             return [f"❌ خطأ في تحليل الكود: {str(e)}"]
     
+    # ✅ تم تعديل هذه الدالة فقط
     def _create_safe_namespace(self) -> Dict[str, Any]:
         """إنشاء namespace آمن للتنفيذ"""
         namespace = {
             'sp': sp,
-            '__builtins__': ALLOWED_BUILTINS,  # فقط الدوال المسموح بها
+            '__builtins__': __builtins__,  # ✅ استخدام builtins الأصلي (يسمح بـ __import__)
         }
         
         # إضافة الدوال المساعدة
