@@ -717,6 +717,9 @@ async def admin_docs(request: Request):
     return RedirectResponse(url="/docs")
 
 
+# ==============================================================================
+# ✅✅✅ منطقة الاختبار والتصحيح ✅✅✅
+# ==============================================================================
 @app.post("/solve", response_model=SolveResponse)
 @track_request
 @require_engines
@@ -726,495 +729,71 @@ async def solve_problem(
     background_tasks: BackgroundTasks,
     request_id: str = None
 ):
-    start_time = time.time()
-    stages = {}
-    
-    logger.info(f"[{request_id}] Request: {request.question[:100]}... (domain: {request.domain})")
-    
-    async with CACHE_LOCK:
-        final_cache_key = app_state.cache.get_final_key(request.question, request.domain, request.include_steps)
-        cached_final = await app_state.cache.get_final_result(request.question, request.domain, request.include_steps)
-    
-    if cached_final:
-        logger.info(f"[{request_id}] Final cache hit")
-        cached_final["from_cache"] = True
-        cached_final["execution_time"] = time.time() - start_time
-        cached_final["request_id"] = request_id
-        return cached_final
-    
-    try:
-        stage_start = time.time()
-        
-        async with CACHE_LOCK:
-            ai_result = await app_state.cache.get_ai_result(request.question, request.domain)
-        
-        if not ai_result:
-            logger.trace(f"[{request_id}] AI cache miss")
-            ai_result = await app_state.ai_engine.generate_code(
-                question=request.question,
-                domain=request.domain
-            )
-            if ai_result.get("success"):
-                async with CACHE_LOCK:
-                    await app_state.cache.set_ai_result(request.question, request.domain, ai_result)
-            from_ai_cache = False
-        else:
-            logger.trace(f"[{request_id}] AI cache hit")
-            from_ai_cache = True
-        
-        stages["ai_generation"] = time.time() - stage_start
-        
-        if not ai_result.get("success"):
-            return SolveResponse(
-                success=False,
-                request_id=request_id,
-                timestamp=time.time(),
-                execution_time=time.time() - start_time,
-                model=ai_result.get("model", "unknown"),
-                domain=request.domain,
-                error=ai_result.get("error", "AI generation failed"),
-                status="ai_error",
-                warning=ai_result.get("warning"),
-                from_ai_cache=from_ai_cache,
-                stages_timing=stages
-            )
-        
-        stage_start = time.time()
-        timeout = request.timeout or 10
-        
-        async with CACHE_LOCK:
-            math_result_obj = await app_state.cache.get_math_result(ai_result["code"])
-        
-        if not math_result_obj:
-            logger.trace(f"[{request_id}] Math cache miss")
-            try:
-                loop = asyncio.get_running_loop()
-                
-                math_task = asyncio.create_task(
-                    app_state.math_engine.execute(
-                        code=ai_result["code"],
-                        use_ai_assist=request.use_ai_assist
-                    )
-                )
-                
-                math_result_obj = await asyncio.wait_for(math_task, timeout=timeout)
-                
-                if math_result_obj.success:
-                    async with CACHE_LOCK:
-                        await app_state.cache.set_math_result(ai_result["code"], math_result_obj)
-                from_math_cache = False
-                
-            except asyncio.TimeoutError:
-                math_task.cancel()
-                stages["math_execution"] = time.time() - stage_start
-                logger.warning(f"[{request_id}] Math execution timeout after {timeout}s")
-                return SolveResponse(
-                    success=False,
-                    request_id=request_id,
-                    timestamp=time.time(),
-                    execution_time=time.time() - start_time,
-                    model=ai_result.get("model", "unknown"),
-                    domain=request.domain,
-                    error=f"Execution timeout after {timeout} seconds",
-                    status="timeout",
-                    from_ai_cache=from_ai_cache,
-                    stages_timing=stages
-                )
-        else:
-            logger.trace(f"[{request_id}] Math cache hit")
-            from_math_cache = True
-        
-        stages["math_execution"] = time.time() - stage_start
-        
-        response = SolveResponse(
-            success=math_result_obj.success,
-            request_id=request_id,
-            timestamp=time.time(),
-            execution_time=time.time() - start_time,
-            result=math_result_obj.result_str if math_result_obj.success else None,
-            result_latex=math_result_obj.result_latex if request.include_steps and math_result_obj.success else None,
-            steps=[s.to_dict() for s in math_result_obj.steps] if request.include_steps and math_result_obj.steps else None,
-            code=ai_result["code"] if DEBUG_MODE else None,
-            model=ai_result.get("model", "unknown"),
-            domain=request.domain,
-            expression_type=math_result_obj.expression_type.value if hasattr(math_result_obj, 'expression_type') else None,
-            confidence=ai_result.get("confidence"),
-            status=math_result_obj.status.value if hasattr(math_result_obj, 'status') else None,
-            from_cache=False,
-            from_ai_cache=from_ai_cache,
-            from_math_cache=from_math_cache,
-            ai_assist=math_result_obj.ai_assist if hasattr(math_result_obj, 'ai_assist') else None,
-            warning=ai_result.get("warning") or (math_result_obj.error if not math_result_obj.success else None),
-            error=math_result_obj.error if not math_result_obj.success else None,
-            stages_timing=stages
-        )
-        
-        logger.info(f"[{request_id}] Completed in {response.execution_time:.2f}s - Success: {response.success}")
-        
-        if response.success:
-            async with CACHE_LOCK:
-                await app_state.cache.set_final_result(request.question, request.domain, request.include_steps, response.dict())
-        
-        if response.execution_time > 5:
-            background_tasks.add_task(
-                logger.warning,
-                f"[{request_id}] Slow request: {response.execution_time:.2f}s"
-            )
-        
-        return response
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[{request_id}] Error: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}"
-        )
-
-
-@app.post("/solve/with-steps", response_model=SolveResponse)
-@track_request
-@require_engines
-@validate_input
-async def solve_with_steps(
-    request: SolveRequest, 
-    background_tasks: BackgroundTasks,
-    request_id: str = None
-):
-    request.include_steps = True
-    return await solve_problem(request, background_tasks, request_id=request_id)
-
-
-@app.post("/evaluate", response_model=EvaluateResponse)
-@track_request
-@require_engines
-@validate_input
-async def evaluate_expression(
-    request: EvaluateRequest,
-    request_id: str = None
-):
-    start_time = time.time()
-    logger.info(f"[{request_id}] Evaluate: {request.expression}")
-    
-    try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(
-            app_state.executor,
-            lambda: app_state.math_engine.evaluate_expression(
-                expression=request.expression,
-                subs=request.subs,
-                operation=request.operation,
-                variable=request.variable
-            )
-        )
-        
-        return EvaluateResponse(
-            success=result.get("success", False),
-            request_id=request_id,
-            timestamp=time.time(),
-            execution_time=time.time() - start_time,
-            expression=request.expression,
-            result=result.get("result"),
-            result_latex=result.get("result_latex"),
-            steps=result.get("steps"),
-            operation=request.operation,
-            variable=request.variable,
-            error=result.get("error"),
-            warning=result.get("warning")
-        )
-        
-    except Exception as e:
-        logger.error(f"[{request_id}] Error: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
-
-
-@app.post("/simplify", response_model=SimplifyResponse)
-@track_request
-@require_engines
-@validate_input
-async def simplify_expression(
-    request: SimplifyRequest,
-    request_id: str = None
-):
-    start_time = time.time()
-    logger.info(f"[{request_id}] Simplify: {request.expression}")
-    
-    try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(
-            app_state.executor,
-            lambda: app_state.math_engine.simplify_expression(request.expression)
-        )
-        
-        return SimplifyResponse(
-            success=result.get("success", False),
-            request_id=request_id,
-            timestamp=time.time(),
-            execution_time=time.time() - start_time,
-            original=result.get("original", request.expression),
-            original_latex=result.get("original_latex", ""),
-            simplified=result.get("simplified", ""),
-            simplified_latex=result.get("simplified_latex", ""),
-            steps=result.get("steps", []),
-            error=result.get("error"),
-            warning=result.get("warning")
-        )
-        
-    except Exception as e:
-        logger.error(f"[{request_id}] Error: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
-
-
-@app.post("/validate", response_model=ValidateResponse)
-@track_request
-@require_engines
-@validate_input
-async def validate_code(
-    request: ValidateRequest,
-    request_id: str = None
-):
-    logger.info(f"[{request_id}] Validate code length: {len(request.code)}")
-    
-    try:
-        validation = app_state.math_engine.validate_code(request.code)
-        
-        return ValidateResponse(
-            valid=validation.get("valid", False),
-            request_id=request_id,
-            timestamp=time.time(),
-            type=validation.get("type"),
-            error=validation.get("error"),
-            pattern=validation.get("pattern"),
-            operations=validation.get("operations"),
-            expression_type=validation.get("expression_type")
-        )
-        
-    except Exception as e:
-        logger.error(f"[{request_id}] Error: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
-
-
-@app.get("/health", response_model=HealthResponse)
-@require_engines
-async def health_check():
-    ai_health = await app_state.ai_engine.health_check() if hasattr(app_state.ai_engine, 'health_check') else {}
-    math_stats = app_state.math_engine.get_stats()
-    resources = app_state.monitor.get_usage()
-    cache_stats = await app_state.cache.get_stats()
-    executor_stats = app_state.monitor.get_threadpool_stats()
-    
-    warnings = []
-    if not ai_health.get("apis", {}).get("groq") and not ai_health.get("apis", {}).get("gemini"):
-        warnings.append("No AI APIs available - running in simulation mode")
-    if math_stats.get("timeouts", 0) > 10:
-        warnings.append(f"High number of timeouts: {math_stats['timeouts']}")
-    if math_stats.get("security_errors", 0) > 5:
-        warnings.append(f"Security errors detected: {math_stats['security_errors']}")
-    if resources.get("cpu_warning"):
-        warnings.append(f"High CPU usage: {resources['cpu_percent']:.1f}%")
-    if resources.get("memory_warning"):
-        warnings.append(f"High memory usage: {resources['memory_percent']:.1f}%")
-    if executor_stats.get("pending_work", 0) > 50:
-        warnings.append(f"High pending tasks: {executor_stats['pending_work']}")
-    
-    return HealthResponse(
-        status="healthy" if not app_state._shutdown else "shutting_down",
-        version=VERSION,
-        timestamp=time.time(),
-        uptime=format_uptime(time.time() - app_state.start_time),
-        uptime_seconds=time.time() - app_state.start_time,
-        engines={"ai": True, "math": True},
-        cache=cache_stats,
-        apis=ai_health.get("apis", {"groq": False, "gemini": False}),
-        stats={
-            "requests": app_state.request_count,
-            "errors": app_state.error_count,
-            "math": math_stats
-        },
-        resources=resources,
-        executor=executor_stats,
-        warnings=warnings,
-        request_count=app_state.request_count,
-        error_count=app_state.error_count
-    )
-
-
-@app.get("/stats")
-@require_engines
-async def get_stats():
-    math_stats = app_state.math_engine.get_stats()
-    ai_stats = app_state.ai_engine.get_stats() if hasattr(app_state.ai_engine, 'get_stats') else {}
-    resources = app_state.monitor.get_usage()
-    cache_stats = await app_state.cache.get_stats()
-    executor_stats = app_state.monitor.get_threadpool_stats()
-    
-    success_rate = (app_state.request_count - app_state.error_count) / max(app_state.request_count, 1) * 100
-    
+    # --- وضع الاختبار: تجاهل كل المحركات وأرجع إجابة ثابتة ---
+    print(f"[{request_id}] TEST MODE: Received question '{request.question}'. Returning fixed response.")
     return {
-        "server": {
-            "uptime": format_uptime(time.time() - app_state.start_time),
-            "uptime_seconds": time.time() - app_state.start_time,
-            "requests": app_state.request_count,
-            "errors": app_state.error_count,
-            "success_rate": f"{success_rate:.1f}%",
-            "cache": cache_stats,
-            "resources": resources,
-            "executor": executor_stats
-        },
-        "ai_engine": ai_stats,
-        "math_engine": math_stats,
-        "timestamp": time.time()
+        "success": True,
+        "request_id": request_id,
+        "timestamp": time.time(),
+        "execution_time": 0.1,
+        "result": "4",
+        "result_latex": "4",
+        "steps": [{"text": "هذه إجابة ثابتة من وضع الاختبار", "latex": ""}],
+        "model": "test-mode",
+        "domain": request.domain,
+        "from_cache": False,
+        "status": "success",
+        "confidence": 1.0,
+        "from_ai_cache": False,
+        "from_math_cache": False,
+        "ai_assist": None,
+        "stages_timing": None,
+        "warning": None,
+        "error": None,
+        "code": "N/A in test mode",
+        "expression_type": "simple"
     }
+# ==============================================================================
+# ❌❌❌ الكود الأصلي المعقد تم تعطيله مؤقتاً ❌❌❌
+# ==============================================================================
 
-
-@app.post("/cache/clear")
-@require_engines
-@require_admin
-async def clear_cache(request: Request):
-    await app_state.cache.clear_all()
-    logger.info("All caches cleared")
-    return {"success": True, "message": "All caches cleared"}
-
-
-@app.post("/reset-stats")
-@require_engines
-@require_admin
-async def reset_stats(request: Request):
-    if app_state.math_engine:
-        app_state.math_engine.reset_stats()
+# @app.post("/solve", response_model=SolveResponse)
+# @track_request
+# @require_engines
+# @validate_input
+# async def solve_problem(
+#     request: SolveRequest, 
+#     background_tasks: BackgroundTasks,
+#     request_id: str = None
+# ):
+#     start_time = time.time()
+#     stages = {}
     
-    if app_state.ai_engine and hasattr(app_state.ai_engine, 'reset_stats'):
-        app_state.ai_engine.reset_stats()
+#     logger.info(f"[{request_id}] Request: {request.question[:100]}... (domain: {request.domain})")
     
-    app_state.request_count = 0
-    app_state.error_count = 0
+#     async with CACHE_LOCK:
+#         final_cache_key = app_state.cache.get_final_key(request.question, request.domain, request.include_steps)
+#         cached_final = await app_state.cache.get_final_result(request.question, request.domain, request.include_steps)
     
-    logger.info("Statistics reset")
-    return {"success": True, "message": "Statistics reset"}
-
-
-@app.get("/domains")
-async def get_domains():
-    return {"domains": SUPPORTED_DOMAINS}
-
-
-@app.get("/models")
-@require_engines
-async def get_models_status():
-    health = await app_state.ai_engine.health_check() if hasattr(app_state.ai_engine, 'health_check') else {}
-    return {
-        "apis": health.get("apis", {}),
-        "templates": health.get("templates", []),
-        "cache": health.get("cache", {}),
-        "simulation_mode": not (health.get("apis", {}).get("groq") or health.get("apis", {}).get("gemini"))
-    }
-
-
-@app.get("/metrics", response_class=PlainTextResponse)
-@require_engines
-async def get_metrics():
-    math_stats = app_state.math_engine.get_stats()
-    resources = app_state.monitor.get_usage()
-    cache_stats = await app_state.cache.get_stats()
+#     if cached_final:
+#         logger.info(f"[{request_id}] Final cache hit")
+#         cached_final["from_cache"] = True
+#         cached_final["execution_time"] = time.time() - start_time
+#         cached_final["request_id"] = request_id
+#         return cached_final
     
-    metrics = []
-    metrics.append("# HELP zaky_requests_total Total requests received")
-    metrics.append("# TYPE zaky_requests_total counter")
-    metrics.append(f"zaky_requests_total {app_state.request_count}")
-    
-    metrics.append("# HELP zaky_errors_total Total errors encountered")
-    metrics.append("# TYPE zaky_errors_total counter")
-    metrics.append(f"zaky_errors_total {app_state.error_count}")
-    
-    metrics.append("# HELP zaky_uptime_seconds Uptime in seconds")
-    metrics.append("# TYPE zaky_uptime_seconds gauge")
-    metrics.append(f"zaky_uptime_seconds {time.time() - app_state.start_time}")
-    
-    metrics.append("# HELP zaky_cache_hits_total Total cache hits")
-    metrics.append("# TYPE zaky_cache_hits_total counter")
-    metrics.append(f"zaky_cache_hits_total {cache_stats['final_cache']['hits']}")
-    
-    metrics.append("# HELP zaky_cache_misses_total Total cache misses")
-    metrics.append("# TYPE zaky_cache_misses_total counter")
-    metrics.append(f"zaky_cache_misses_total {cache_stats['final_cache']['misses']}")
-    
-    metrics.append("# HELP zaky_cpu_percent CPU usage percent")
-    metrics.append("# TYPE zaky_cpu_percent gauge")
-    metrics.append(f"zaky_cpu_percent {resources['cpu_percent']}")
-    
-    metrics.append("# HELP zaky_memory_mb Memory usage in MB")
-    metrics.append("# TYPE zaky_memory_mb gauge")
-    metrics.append(f"zaky_memory_mb {resources['memory_mb']}")
-    
-    metrics.append("# HELP zaky_pending_tasks Pending executor tasks")
-    metrics.append("# TYPE zaky_pending_tasks gauge")
-    metrics.append(f"zaky_pending_tasks {app_state.monitor.get_threadpool_stats().get('pending_work', 0)}")
-    
-    return "\n".join(metrics)
-
-
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "success": False,
-            "error": exc.detail,
-            "status_code": exc.status_code,
-            "path": request.url.path,
-            "timestamp": time.time(),
-            "request_id": generate_request_id()
-        }
-    )
-
-
-@app.exception_handler(Exception)
-async def general_exception_handler(request: Request, exc: Exception):
-    error_id = generate_request_id()
-    logger.error(f"Unhandled exception [{error_id}]: {exc}", exc_info=True)
-    
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "success": False,
-            "error": "Internal server error",
-            "error_id": error_id,
-            "detail": str(exc) if DEBUG_MODE else None,
-            "path": request.url.path,
-            "timestamp": time.time(),
-            "request_id": generate_request_id()
-        }
-    )
-
-
-if __name__ == "__main__":
-    print("\n" + "="*60)
-    print(f"{APP_NAME} v{VERSION}")
-    print("="*60)
-    print(f"Host: {HOST}")
-    print(f"Port: {PORT}")
-    print(f"Debug: {DEBUG_MODE}")
-    print(f"Executor: {'Process' if USE_PROCESS_POOL else 'Thread'} with {WORKER_COUNT} workers")
-    print(f"Max code length: {MAX_CODE_LENGTH}")
-    print(f"Static files: ./static/")
-    print(f"API Docs: http://{HOST}:{PORT}/docs")
-    print(f"Web UI: http://{HOST}:{PORT}/")
-    print("="*60)
-    
-    uvicorn.run(
-        "main:app",
-        host=HOST,
-        port=PORT,
-        reload=DEBUG_MODE,
-        log_level="debug" if DEBUG_MODE else "info"
-    )
+#     try:
+#         stage_start = time.time()
+        
+#         async with CACHE_LOCK:
+#             ai_result = await app_state.cache.get_ai_result(request.question, request.domain)
+        
+#         if not ai_result:
+#             logger.trace(f"[{request_id}] AI cache miss")
+#             ai_result = await app_state.ai_engine.generate_code(
+#                 question=request.question,
+#                 domain=request.domain
+#             )
+#             if ai_result.get("success"):
+#                 async with CACHE_LOCK:
+#                     await app_state
