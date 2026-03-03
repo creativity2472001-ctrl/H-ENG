@@ -1,4 +1,4 @@
-# ai_engine.py - الإصدار المصحح والمتوافق مع math_engine.py
+# ai_engine.py - الإصدار النهائي الكامل مع جميع التحسينات
 import sympy as sp
 import re
 import httpx
@@ -60,6 +60,15 @@ def extract_variable(expr) -> sp.Symbol:
         return variables[0]
     return sp.symbols('x')
 
+def extract_variables_from_expr(expr_str: str) -> List[str]:
+    """استخراج جميع المتغيرات من تعبير"""
+    try:
+        expr = safe_sympify(expr_str)
+        return [str(var) for var in expr.free_symbols]
+    except:
+        # إذا فشل التحويل، ابحث عن المتغيرات بالنمط
+        return re.findall(r'[xyz]', expr_str)
+
 # ========== دوال LaTeX ==========
 def to_latex(expr) -> str:
     """تحويل تعبير إلى LaTeX بأمان"""
@@ -70,7 +79,16 @@ def to_latex(expr) -> str:
 
 def is_math(text: str) -> bool:
     """فحص إذا كان النص يحتوي على معادلة رياضية"""
-    return any(c in text for c in '+-*/^=()')
+    math_patterns = [
+        r'[\d\+\-\*/\^\(\)]',  # رموز رياضية
+        r'(sin|cos|tan|cot|sec|csc|log|ln|exp|sqrt)',  # دوال رياضية
+        r'[xyz]',  # متغيرات
+    ]
+    text_lower = text.lower()
+    for pattern in math_patterns:
+        if re.search(pattern, text_lower):
+            return True
+    return False
 
 def format_step(text: str, latex: str = "") -> Tuple[str, str]:
     """تنسيق خطوة واحدة (نص + LaTeX)"""
@@ -100,9 +118,9 @@ class Memory:
     def get_stats(self):
         return self.stats
 
-# ========== ✅ التغيير 1: تغيير اسم الكلاس لتجنب التعارض ==========
+# ========== محرك الرياضيات الرمزية ==========
 class SymbolicMath:
-    """محرك الرياضيات الرمزية (تم تغيير الاسم من MathEngine)"""
+    """محرك الرياضيات الرمزية"""
     
     def __init__(self):
         self.x, self.y, self.z = sp.symbols('x y z')
@@ -126,7 +144,7 @@ class SymbolicMath:
             return "خطأ", [(f"❌ {str(e)}", "")]
     
     def derivative(self, func: str) -> Tuple[str, List[tuple]]:
-        """حساب المشتقة"""
+        """حساب المشتقة مع اكتشاف المتغيرات"""
         try:
             expr = safe_sympify(func)
             var = extract_variable(expr)
@@ -145,7 +163,7 @@ class SymbolicMath:
             return "خطأ", [(f"❌ {str(e)}", "")]
     
     def integral(self, func: str) -> Tuple[str, List[tuple]]:
-        """حساب التكامل"""
+        """حساب التكامل مع اكتشاف المتغيرات"""
         try:
             expr = safe_sympify(func)
             var = extract_variable(expr)
@@ -164,7 +182,7 @@ class SymbolicMath:
             return "خطأ", [(f"❌ {str(e)}", "")]
     
     def equation(self, eq: str) -> Tuple[str, List[tuple]]:
-        """حل المعادلة"""
+        """حل المعادلة مع اكتشاف المتغيرات"""
         try:
             if "=" in eq:
                 left, right = eq.split("=")
@@ -202,105 +220,202 @@ class SymbolicMath:
         except Exception as e:
             return "خطأ", [(f"❌ {str(e)}", "")]
 
-# ========== ✅ التغيير 2: دوال مساعدة لتوليد الكود ==========
-def _generate_calculator_code(expr: str, result: float, steps: List[tuple]) -> str:
-    """توليد كود آلة حاسبة"""
-    steps_code = []
-    for step in steps:
-        desc, latex = step
-        steps_code.append(f'    format_step("{desc}", "{latex}")')
+# ========== دوال توليد الكود المحسنة ==========
+class CodeGenerator:
+    """توليد كود SymPy بشكل آمن"""
     
-    return f'''
-# كود آلة حاسبة
+    @staticmethod
+    def _escape_string(text: str) -> str:
+        """تنظيف النص من علامات الاقتباس"""
+        if text is None:
+            return ""
+        return str(text).replace('"', '\\"').replace('\n', '\\n')
+    
+    @staticmethod
+    def _steps_to_code(steps: List[tuple]) -> str:
+        """تحويل الخطوات إلى كود"""
+        steps_code = []
+        for step in steps:
+            desc, latex = step
+            desc = CodeGenerator._escape_string(desc)
+            latex = CodeGenerator._escape_string(latex)
+            steps_code.append(f'    format_step("{desc}", "{latex}")')
+        return ',\n'.join(steps_code)
+    
+    @staticmethod
+    def calculator(expr: str, result: float, steps: List[tuple]) -> str:
+        """توليد كود آلة حاسبة"""
+        steps_code = CodeGenerator._steps_to_code(steps)
+        expr_clean = CodeGenerator._escape_string(expr)
+        
+        return f'''# كود آلة حاسبة
 import sympy as sp
 
 def format_step(text: str, latex: str = "") -> tuple:
     return (text, latex)
 
-expr = sp.sympify("{expr}")
+expr = sp.sympify("{expr_clean}")
 final_result = expr.evalf()
 steps = [
-{chr(10).join(steps_code)}
-]
-'''
-
-def _generate_derivative_code(func: str, result: str, steps: List[tuple]) -> str:
-    """توليد كود مشتقة"""
-    steps_code = []
-    for step in steps:
-        desc, latex = step
-        steps_code.append(f'    format_step("{desc}", "{latex}")')
+{steps_code}
+]'''
     
-    return f'''
-# كود مشتقة
+    @staticmethod
+    def derivative(func: str, steps: List[tuple]) -> str:
+        """توليد كود مشتقة مع اكتشاف المتغيرات"""
+        # استخراج المتغيرات
+        variables = extract_variables_from_expr(func)
+        var_name = variables[0] if variables else 'x'
+        
+        steps_code = CodeGenerator._steps_to_code(steps)
+        func_clean = CodeGenerator._escape_string(func)
+        
+        return f'''# كود مشتقة
 import sympy as sp
 
 def format_step(text: str, latex: str = "") -> tuple:
     return (text, latex)
 
-x = sp.symbols('x')
-f = sp.sympify("{func}")
-final_result = sp.diff(f, x)
+{var_name} = sp.symbols('{var_name}')
+f = sp.sympify("{func_clean}")
+final_result = sp.diff(f, {var_name})
 steps = [
-{chr(10).join(steps_code)}
-]
-'''
-
-def _generate_integral_code(func: str, result: str, steps: List[tuple]) -> str:
-    """توليد كود تكامل"""
-    steps_code = []
-    for step in steps:
-        desc, latex = step
-        steps_code.append(f'    format_step("{desc}", "{latex}")')
+{steps_code}
+]'''
     
-    return f'''
-# كود تكامل
+    @staticmethod
+    def integral(func: str, steps: List[tuple]) -> str:
+        """توليد كود تكامل مع اكتشاف المتغيرات"""
+        # استخراج المتغيرات
+        variables = extract_variables_from_expr(func)
+        var_name = variables[0] if variables else 'x'
+        
+        steps_code = CodeGenerator._steps_to_code(steps)
+        func_clean = CodeGenerator._escape_string(func)
+        
+        return f'''# كود تكامل
 import sympy as sp
 
 def format_step(text: str, latex: str = "") -> tuple:
     return (text, latex)
 
-x = sp.symbols('x')
-f = sp.sympify("{func}")
-final_result = sp.integrate(f, x)
+{var_name} = sp.symbols('{var_name}')
+f = sp.sympify("{func_clean}")
+final_result = sp.integrate(f, {var_name})
 steps = [
-{chr(10).join(steps_code)}
-]
-'''
-
-def _generate_equation_code(eq: str, result: str, steps: List[tuple]) -> str:
-    """توليد كود معادلة"""
-    steps_code = []
-    for step in steps:
-        desc, latex = step
-        steps_code.append(f'    format_step("{desc}", "{latex}")')
+{steps_code}
+]'''
     
-    return f'''
-# كود معادلة
+    @staticmethod
+    def equation(eq: str, steps: List[tuple]) -> str:
+        """توليد كود معادلة مع اكتشاف المتغيرات"""
+        # استخراج المتغيرات
+        variables = extract_variables_from_expr(eq)
+        var_name = variables[0] if variables else 'x'
+        
+        steps_code = CodeGenerator._steps_to_code(steps)
+        eq_clean = CodeGenerator._escape_string(eq)
+        
+        left_part = eq.split('=')[0] if '=' in eq else eq
+        right_part = eq.split('=')[1] if '=' in eq else '0'
+        left_clean = CodeGenerator._escape_string(left_part)
+        right_clean = CodeGenerator._escape_string(right_part)
+        
+        return f'''# كود معادلة
 import sympy as sp
 
 def format_step(text: str, latex: str = "") -> tuple:
     return (text, latex)
 
-x = sp.symbols('x')
-left, right = sp.sympify("{eq.split('=')[0]}"), sp.sympify("{eq.split('=')[1] if '=' in eq else '0'}")
+{var_name} = sp.symbols('{var_name}')
+left = sp.sympify("{left_clean}")
+right = sp.sympify("{right_clean}")
 expr = left - right
-final_result = sp.solve(expr, x)
+final_result = sp.solve(expr, {var_name})
 steps = [
-{chr(10).join(steps_code)}
+{steps_code}
+]'''
+    
+    @staticmethod
+    def ai_fallback(provider: str, result: str, steps: List[tuple]) -> str:
+        """توليد كود لنتيجة الذكاء الاصطناعي"""
+        result_clean = CodeGenerator._escape_string(result)
+        
+        steps_code = []
+        for step in steps:
+            desc, latex = step
+            desc = CodeGenerator._escape_string(desc)
+            latex = CodeGenerator._escape_string(latex)
+            steps_code.append(f'    ("{desc}", "{latex}")')
+        steps_str = ',\n'.join(steps_code)
+        
+        return f'''# إجابة {provider}
+result = "{result_clean}"
+steps = [
+{steps_str}
 ]
-'''
+final_result = result'''
 
-# ========== محرك AI ==========
+# ========== محرك AI مع Fallback متعدد ==========
 class AIEngine:
     def __init__(self):
-        # ✅ التغيير 3: استخدام SymbolicMath بدلاً من MathEngine
         self.math = SymbolicMath()
         self.memory = Memory()
         self.ready = True
         self.groq_key = GROQ_API_KEY
         self.gemini_key = GEMINI_API_KEY
-        print("✅ AI Engine ready - الإصدار المصحح")
+        self.code_gen = CodeGenerator()
+        print("✅ AI Engine ready - الإصدار النهائي مع جميع التحسينات")
+    
+    def _is_simple_arithmetic(self, expr: str) -> bool:
+        """فحص إذا كان التعبير حسابياً بسيطاً (أرقام فقط)"""
+        cleaned = expr.replace(" ", "")
+        
+        # إذا كان هناك متغيرات، فليس حساباً بسيطاً
+        if any(var in cleaned for var in ['x', 'y', 'z']):
+            return False
+        
+        allowed_chars = "0123456789+-*/()."
+        return all(c in allowed_chars for c in cleaned)
+    
+    def _extract_math_expression(self, text: str) -> Optional[str]:
+        """استخراج التعبير الرياضي من النص بشكل دقيق"""
+        # تنظيف النص أولاً
+        cleaned = clean_math_input(text)
+        
+        # إزالة الكلمات الدالة
+        for word in ["مشتقة", "مشتق", "derivative", "diff", "تكامل", "integral", "حل", "solve"]:
+            cleaned = cleaned.replace(word, "").strip()
+        
+        # قائمة الأنماط المتقدمة
+        patterns = [
+            # نمط f(x) = ...
+            r'f\([xyz]\)\s*=\s*([^,\n]+)',
+            
+            # نمط دالة بين قوسين
+            r'[\(\s]*([a-zA-Z0-9\*\-\+\/\(\)\^]+(?:sin|cos|tan|log|exp|sqrt)[a-zA-Z0-9\*\-\+\/\(\)\^]*)[\)\s]*',
+            
+            # نمط أي تعبير رياضي مع دوال
+            r'([a-zA-Z0-9\*\-\+\/\(\)\^]+(?:sin|cos|tan|log|exp|sqrt)[a-zA-Z0-9\*\-\+\/\(\)\^]*)',
+            
+            # نمط معادلة مع علامة =
+            r'([^=\s]+=[^=\s]+)',
+            
+            # نمط عام مع متغيرات متعددة
+            r'([xyz][\s\*\-\+\/\(\)\^]*[xyz]*(?:\s*[\+\-\*\/]\s*[xyz\da-zA-Z]+)*)',
+            
+            # آخر خيار: أي تعبير رياضي
+            r'([a-zA-Z0-9\*\-\+\/\(\)\^]+)',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, cleaned, re.IGNORECASE)
+            if match:
+                expr = match.group(1).strip()
+                if expr and len(expr) > 0:
+                    return expr
+        
+        return None
     
     async def ask_gemini(self, question: str) -> Dict[str, Any]:
         """سؤال Gemini API"""
@@ -327,7 +442,6 @@ class AIEngine:
                         steps = [
                             ("🤖 إجابة Gemini", ""),
                             (answer, answer if is_math(answer) else ""),
-                            ("", "")
                         ]
                         return {
                             "success": True,
@@ -340,25 +454,64 @@ class AIEngine:
         except Exception as e:
             return {"success": False, "error": f"Gemini error: {str(e)}"}
     
-    # ✅ التغيير 4: دالة مساعدة لاستخراج التعبير الرياضي
-    def _extract_math_expression(self, text: str) -> Optional[str]:
-        """استخراج التعبير الرياضي من النص"""
-        # تنظيف النص أولاً
-        cleaned = clean_math_input(text)
+    async def ask_groq(self, question: str) -> Dict[str, Any]:
+        """سؤال Groq API"""
+        if not self.groq_key:
+            return {"success": False, "error": "مفتاح Groq غير موجود"}
         
-        # أنماط البحث
-        patterns = [
-            r'm?\(([^)]+)\)',  # محتوى بين قوسين
-            r'([a-zA-Z0-9\*\-\+\/\(\)\^]+)',  # أي تعبير رياضي
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, cleaned)
-            if match:
-                return match.group(1)
-        return None
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                url = "https://api.groq.com/openai/v1/chat/completions"
+                response = await client.post(
+                    url,
+                    headers={
+                        "Authorization": f"Bearer {self.groq_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": "mixtral-8x7b-32768",
+                        "messages": [{"role": "user", "content": question}],
+                        "temperature": 0.7
+                    }
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    answer = data["choices"][0]["message"]["content"]
+                    steps = [
+                        ("🤖 إجابة Groq", ""),
+                        (answer, answer if is_math(answer) else ""),
+                    ]
+                    return {
+                        "success": True,
+                        "result": answer,
+                        "steps": steps,
+                        "model": "groq",
+                        "from_cache": False
+                    }
+                return {"success": False, "error": f"Groq error: {response.status_code}"}
+        except Exception as e:
+            return {"success": False, "error": f"Groq error: {str(e)}"}
     
-    # ✅ التغيير 5: تحسين generate_code لترجع كوداً حقيقياً
+    async def _try_ai_fallback(self, question: str) -> Dict[str, Any]:
+        """محاولة الذكاء الاصطناعي مع عدة مزودين"""
+        providers = []
+        
+        if self.gemini_key:
+            providers.append(("gemini", self.ask_gemini))
+        if self.groq_key:
+            providers.append(("groq", self.ask_groq))
+        
+        for provider_name, provider_func in providers:
+            try:
+                result = await provider_func(question)
+                if result.get("success"):
+                    return result
+            except Exception:
+                continue
+        
+        return {"success": False, "error": "جميع مزودي الذكاء الاصطناعي غير متاحين"}
+    
     async def generate_code(self, question: str, domain: str = "general") -> Dict[str, Any]:
         """توليد كود SymPy متوافق مع MathEngine"""
         
@@ -377,10 +530,14 @@ class AIEngine:
         code = ""
         
         try:
-            # آلة حاسبة
-            if all(c in "0123456789+-*/()." for c in normalized.replace(" ", "")):
+            # آلة حاسبة (أرقام فقط)
+            if self._is_simple_arithmetic(normalized):
                 result, steps = self.math.calculator(normalized)
-                code = _generate_calculator_code(normalized, float(result) if result != "خطأ" else 0, steps)
+                code = self.code_gen.calculator(
+                    normalized, 
+                    float(result) if result != "خطأ" else 0, 
+                    steps
+                )
                 model = "calculator"
             
             # مشتقات
@@ -388,7 +545,7 @@ class AIEngine:
                 expr = self._extract_math_expression(question)
                 if expr:
                     result, steps = self.math.derivative(expr)
-                    code = _generate_derivative_code(expr, result, steps)
+                    code = self.code_gen.derivative(expr, steps)
                     model = "derivative"
                 else:
                     return {"success": False, "error": "لم نتمكن من استخراج الدالة"}
@@ -398,7 +555,7 @@ class AIEngine:
                 expr = self._extract_math_expression(question)
                 if expr:
                     result, steps = self.math.integral(expr)
-                    code = _generate_integral_code(expr, result, steps)
+                    code = self.code_gen.integral(expr, steps)
                     model = "integral"
                 else:
                     return {"success": False, "error": "لم نتمكن من استخراج الدالة"}
@@ -406,32 +563,30 @@ class AIEngine:
             # معادلات
             elif any(word in question for word in ["حل", "solve"]) or "=" in normalized:
                 result, steps = self.math.equation(normalized)
-                code = _generate_equation_code(normalized, result, steps)
+                code = self.code_gen.equation(normalized, steps)
                 model = "equation"
             
-            # AI Fallback
+            # AI Fallback مع عدة مزودين
             else:
-                ai_result = await self.ask_gemini(question)
+                ai_result = await self._try_ai_fallback(question)
                 if ai_result.get("success"):
-                    # ✅ تحويل نتيجة Gemini إلى كود
-                    code = f'''
-# إجابة Gemini
-result = """{ai_result["result"]}"""
-steps = {ai_result["steps"]}
-final_result = result
-'''
+                    code = self.code_gen.ai_fallback(
+                        ai_result["model"],
+                        ai_result["result"],
+                        ai_result["steps"]
+                    )
                     ai_result["code"] = code
                     self.memory.set(normalized, ai_result)
                     return ai_result
                 else:
                     return {"success": False, "error": "لم يتم التعرف على نوع المسألة"}
             
-            # ✅ التغيير 6: تجهيز النتيجة مع الكود
+            # تجهيز النتيجة مع الكود
             response = {
                 "success": True,
                 "result": result,
                 "steps": steps,
-                "code": code,  # الآن يحتوي على كود حقيقي
+                "code": code,
                 "model": model,
                 "from_cache": False
             }
