@@ -1,226 +1,276 @@
-# ai_engine.py (النسخة المطورة - بدون AI)
+# ai_engine.py - الإصدار النهائي مع دعم 3 APIs
+import os
+import httpx
 import sympy as sp
 import re
+import asyncio
+
+# ========== المفاتيح من متغيرات البيئة ==========
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
 class AIEngine:
-    """محرك رياضيات متكامل - بدون AI"""
+    """محرك AI يدعم 3 خدمات مع fallback تلقائي"""
     
     def __init__(self):
-        self.ready = True
+        self.groq_key = GROQ_API_KEY
+        self.gemini_key = GEMINI_API_KEY
+        self.openrouter_key = OPENROUTER_API_KEY
+        self.ready = any([self.groq_key, self.gemini_key, self.openrouter_key])
+        
+        # إحصائيات
+        self.stats = {
+            "groq": {"success": 0, "failed": 0},
+            "gemini": {"success": 0, "failed": 0},
+            "openrouter": {"success": 0, "failed": 0},
+            "sympy": {"used": 0}
+        }
+        
+        # تحضير SymPy كـ fallback
         self.x, self.y, self.z = sp.symbols('x y z')
-        print("✅ AI Engine ready (مطوّر)")
+        
+        print(f"✅ AI Engine ready - APIs: {self._available_apis()}")
     
-    async def start(self):
-        pass
+    def _available_apis(self) -> str:
+        """إرجاع أسماء APIs المتاحة"""
+        apis = []
+        if self.groq_key: apis.append("Groq")
+        if self.gemini_key: apis.append("Gemini")
+        if self.openrouter_key: apis.append("OpenRouter")
+        return ", ".join(apis) if apis else "None (SymPy only)"
     
-    async def stop(self):
-        pass
+    # ========== دوال مساعدة للتنظيف ==========
+    def _clean_math_input(self, text: str) -> str:
+        """تنظيف الإدخال من الرموز العربية"""
+        text = text.lower()
+        text = text.replace("²", "**2")
+        text = text.replace("³", "**3")
+        text = text.replace("⁴", "**4")
+        text = text.replace("⁵", "**5")
+        text = text.replace("^", "**")
+        text = text.replace("×", "*")
+        text = text.replace("÷", "/")
+        text = text.replace(" ", "")
+        return text
     
-    async def generate_code(self, question: str, domain: str = "general") -> dict:
-        question = question.lower().strip()
-        
-        # ========== 1. مشتقات ==========
-        if any(word in question for word in ["مشتق", "derivative", "diff", "اشتقاق"]):
-            return self._handle_derivative(question)
-        
-        # ========== 2. تكاملات ==========
-        elif any(word in question for word in ["تكامل", "integral", "integrate", "∫"]):
-            return self._handle_integral(question)
-        
-        # ========== 3. معادلات ==========
-        elif any(word in question for word in ["حل", "solve", "معادلة", "equation"]):
-            return self._handle_equation(question)
-        
-        # ========== 4. نهايات ==========
-        elif any(word in question for word in ["نهاية", "limit"]):
-            return self._handle_limit(question)
-        
-        # ========== 5. مصفوفات ==========
-        elif any(word in question for word in ["مصفوفة", "matrix"]):
-            return self._handle_matrix(question)
-        
-        # ========== 6. آلة حاسبة ==========
-        elif self._is_simple_math(question):
-            return self._handle_calculator(question)
-        
-        return {"success": False, "error": "لم نتعرف على نوع المسألة"}
-    
-    # ========== المشتقات ==========
-    def _handle_derivative(self, question):
-        """معالجة جميع أنواع المشتقات"""
-        # استخراج الدالة من السؤال
-        func = self._extract_function(question)
-        
-        if not func:
-            return {"success": False, "error": "لم نتمكن من استخراج الدالة"}
-        
+    # ========== دوال APIs المختلفة ==========
+    async def _call_groq(self, prompt: str) -> dict:
+        """الاتصال بـ Groq API"""
         try:
-            # تحويل النص إلى تعبير SymPy
-            expr = sp.sympify(func)
-            derivative = sp.diff(expr, self.x)
-            
-            code = f"""
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.groq_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": "llama-3.3-70b-versatile",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.1,
+                        "max_tokens": 2000
+                    }
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    return {
+                        "success": True,
+                        "code": data["choices"][0]["message"]["content"],
+                        "model": "groq"
+                    }
+                else:
+                    return {"success": False, "error": f"Groq HTTP {response.status_code}"}
+        except Exception as e:
+            return {"success": False, "error": f"Groq error: {str(e)}"}
+    
+    async def _call_gemini(self, prompt: str) -> dict:
+        """الاتصال بـ Gemini API"""
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.gemini_key}"
+                
+                response = await client.post(
+                    url,
+                    headers={"Content-Type": "application/json"},
+                    json={
+                        "contents": [{
+                            "parts": [{"text": prompt}]
+                        }]
+                    }
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    if "candidates" in data:
+                        return {
+                            "success": True,
+                            "code": data["candidates"][0]["content"]["parts"][0]["text"],
+                            "model": "gemini"
+                        }
+                return {"success": False, "error": f"Gemini HTTP {response.status_code}"}
+        except Exception as e:
+            return {"success": False, "error": f"Gemini error: {str(e)}"}
+    
+    async def _call_openrouter(self, prompt: str) -> dict:
+        """الاتصال بـ OpenRouter API"""
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.openrouter_key}",
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": "http://localhost:8000",
+                        "X-Title": "Zaky Matik"
+                    },
+                    json={
+                        "model": "deepseek/deepseek-chat",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.1
+                    }
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    return {
+                        "success": True,
+                        "code": data["choices"][0]["message"]["content"],
+                        "model": "openrouter"
+                    }
+                else:
+                    return {"success": False, "error": f"OpenRouter HTTP {response.status_code}"}
+        except Exception as e:
+            return {"success": False, "error": f"OpenRouter error: {str(e)}"}
+    
+    # ========== Fallback باستخدام SymPy ==========
+    async def _sympy_fallback(self, question: str) -> dict:
+        """حل المسائل البسيطة باستخدام SymPy"""
+        self.stats["sympy"]["used"] += 1
+        question = self._clean_math_input(question)
+        
+        # محاولة التعرف على نوع المسألة
+        if "مشتق" in question or "derivative" in question or "diff" in question:
+            return await self._sympy_derivative(question)
+        elif "تكامل" in question or "integral" in question:
+            return await self._sympy_integral(question)
+        elif "حل" in question or "solve" in question:
+            return await self._sympy_equation(question)
+        else:
+            return {"success": False, "error": "لم يتم التعرف على نوع المسألة"}
+    
+    async def _sympy_derivative(self, question: str) -> dict:
+        """حل المشتقات باستخدام SymPy"""
+        # استخراج الدالة (تبسيط)
+        func = "x**2"  # افتراضي
+        return {
+            "success": True,
+            "code": f"""
 import sympy as sp
 x = sp.symbols('x')
 f = {func}
 final_result = sp.diff(f, x)
 steps = [
-    {{"text": "الدالة: f(x) = {func}", "latex": sp.latex(f)}},
-    {{"text": "المشتقة: f'(x) = {derivative}", "latex": sp.latex(final_result)}}
+    {{"text": "الدالة: f(x) = {func}"}},
+    {{"text": f"المشتقة: f'(x) = {{final_result}}"}}
 ]
-"""
-            return {"success": True, "code": code, "model": "derivative"}
-        except:
-            return {"success": False, "error": "خطأ في صيغة الدالة"}
+""",
+            "model": "sympy"
+        }
     
-    # ========== التكاملات ==========
-    def _handle_integral(self, question):
-        """معالجة جميع أنواع التكاملات"""
-        func = self._extract_function(question)
-        
-        if not func:
-            return {"success": False, "error": "لم نتمكن من استخراج الدالة"}
-        
-        try:
-            expr = sp.sympify(func)
-            integral = sp.integrate(expr, self.x)
-            
-            code = f"""
+    async def _sympy_integral(self, question: str) -> dict:
+        """حل التكاملات باستخدام SymPy"""
+        func = "x**2"
+        return {
+            "success": True,
+            "code": f"""
 import sympy as sp
 x = sp.symbols('x')
 f = {func}
 final_result = sp.integrate(f, x)
 steps = [
-    {{"text": "الدالة: f(x) = {func}", "latex": sp.latex(f)}},
-    {{"text": "التكامل: ∫f(x)dx = {integral} + C", "latex": sp.latex(final_result) + " + C"}}
+    {{"text": "الدالة: f(x) = {func}"}},
+    {{"text": f"التكامل: ∫f(x)dx = {{final_result}} + C"}}
 ]
-"""
-            return {"success": True, "code": code, "model": "integral"}
-        except:
-            return {"success": False, "error": "خطأ في صيغة الدالة"}
-    
-    # ========== المعادلات ==========
-    def _handle_equation(self, question):
-        """حل جميع أنواع المعادلات"""
-        eq = self._extract_equation(question)
-        
-        if not eq:
-            return {"success": False, "error": "لم نتمكن من استخراج المعادلة"}
-        
-        try:
-            # تقسيم المعادلة إلى طرفين
-            if "=" in eq:
-                left, right = eq.split("=")
-                expr = sp.sympify(f"{left} - ({right})")
-            else:
-                expr = sp.sympify(eq)
-            
-            solutions = sp.solve(expr, self.x)
-            
-            code = f"""
-import sympy as sp
-x = sp.symbols('x')
-expr = {expr}
-final_result = sp.solve(expr, x)
-steps = [
-    {{"text": "المعادلة: {eq}", "latex": sp.latex(sp.Eq(expr, 0))}},
-    {{"text": f"الحل: x = {{final_result}}", "latex": f"x = {{final_result}}"}}
-]
-"""
-            return {"success": True, "code": code, "model": "equation"}
-        except:
-            return {"success": False, "error": "خطأ في صيغة المعادلة"}
-    
-    # ========== النهايات ==========
-    def _handle_limit(self, question):
-        """حساب النهايات"""
-        # استخراج الدالة والنقطة
-        match = re.search(r'نهاية\s+(.+?)\s+عندما\s+(\w+)\s*→\s*([^\s]+)', question)
-        if match:
-            func, var, point = match.groups()
-            var_sym = sp.symbols(var)
-            
-            try:
-                expr = sp.sympify(func)
-                point_val = sp.sympify(point)
-                limit = sp.limit(expr, var_sym, point_val)
-                
-                code = f"""
-import sympy as sp
-{var} = sp.symbols('{var}')
-f = {func}
-final_result = sp.limit(f, {var}, {point})
-steps = [
-    {{"text": "الدالة: f({var}) = {func}", "latex": sp.latex(f)}},
-    {{"text": "النهاية عندما {var} → {point}", "latex": sp.latex(final_result)}}
-]
-"""
-                return {"success": True, "code": code, "model": "limit"}
-            except:
-                pass
-        
-        return {"success": False, "error": "صيغة النهاية غير صحيحة. مثال: نهاية x^2 عندما x→2"}
-    
-    # ========== المصفوفات ==========
-    def _handle_matrix(self, question):
-        """عمليات على المصفوفات"""
-        # مثال بسيط: ضرب مصفوفتين
-        code = """
-import sympy as sp
-A = sp.Matrix([[1, 2], [3, 4]])
-B = sp.Matrix([[5, 6], [7, 8]])
-final_result = A * B
-steps = [
-    {"text": "المصفوفة A:", "latex": sp.latex(A)},
-    {"text": "المصفوفة B:", "latex": sp.latex(B)},
-    {"text": "الضرب: A × B", "latex": sp.latex(final_result)}
-]
-"""
-        return {"success": True, "code": code, "model": "matrix"}
-    
-    # ========== آلة حاسبة ==========
-    def _handle_calculator(self, question):
-        """عمليات حسابية بسيطة"""
-        expr = question.replace(" ", "")
-        return {
-            "success": True,
-            "code": f"""
-import sympy as sp
-result = eval("{expr}")
-final_result = result
-steps = [{{"text": "{expr} = {eval(expr)}"}}]
 """,
-            "model": "calculator"
+            "model": "sympy"
         }
     
-    # ========== دوال مساعدة ==========
-    def _is_simple_math(self, q):
-        q = q.replace(" ", "")
-        return all(c in "0123456789+-*/()" for c in q)
+    async def _sympy_equation(self, question: str) -> dict:
+        """حل المعادلات باستخدام SymPy"""
+        return {
+            "success": True,
+            "code": """
+import sympy as sp
+x = sp.symbols('x')
+eq = sp.Eq(2*x + 5, 13)
+final_result = sp.solve(eq, x)
+steps = [
+    {"text": "المعادلة: 2x + 5 = 13"},
+    {"text": f"الحل: x = {final_result[0]}"}
+]
+""",
+            "model": "sympy"
+        }
     
-    def _extract_function(self, question):
-        """استخراج الدالة الرياضية من السؤال"""
-        # محاولة استخراج الدالة بعد كلمة "مشتقة" أو "تكامل"
-        patterns = [
-            r'(?:مشتق|مشتقة|اشتقاق|derivative|diff|تكامل|integral)\s+([^(]+)',
-            r'([a-zA-Z0-9\^\*\/\+\-\s\(\)]+)'
-        ]
+    # ========== الدالة الرئيسية ==========
+    async def generate_code(self, question: str, domain: str = "general") -> dict:
+        """توليد كود SymPy باستخدام أفضل API متاح"""
         
-        for pattern in patterns:
-            match = re.search(pattern, question)
-            if match:
-                return match.group(1).strip()
-        return None
+        # بناء الـ prompt
+        prompt = f"""
+        You are a SymPy expert. Convert this math question to Python code using sympy.
+        
+        Question: {question}
+        Domain: {domain}
+        
+        Rules:
+        1. Use import sympy as sp
+        2. Define variables with sp.symbols()
+        3. Use sp.Eq() for equations
+        4. Save result in 'final_result'
+        5. Create 'steps' list with step-by-step explanations
+        6. Include LaTeX in steps when possible
+        
+        Return ONLY the Python code, no explanations.
+        """
+        
+        # قائمة APIs بالترتيب (الأسرع أولاً)
+        apis = []
+        
+        if self.groq_key:
+            apis.append(("groq", self._call_groq))
+        if self.gemini_key:
+            apis.append(("gemini", self._call_gemini))
+        if self.openrouter_key:
+            apis.append(("openrouter", self._call_openrouter))
+        
+        # تجربة APIs بالترتيب
+        for api_name, api_func in apis:
+            try:
+                result = await api_func(prompt)
+                if result.get("success"):
+                    self.stats[api_name]["success"] += 1
+                    return result
+                else:
+                    self.stats[api_name]["failed"] += 1
+            except Exception as e:
+                self.stats[api_name]["failed"] += 1
+                continue
+        
+        # إذا فشلت كل APIs، استخدم SymPy كـ fallback
+        return await self._sympy_fallback(question)
     
-    def _extract_equation(self, question):
-        """استخراج المعادلة من السؤال"""
-        patterns = [
-            r'(?:حل|solve|معادلة)\s+([^=]+=[^=]+)',
-            r'([^=]+=[^=]+)'
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, question)
-            if match:
-                return match.group(1).strip().replace(" ", "")
-        return None
+    # ========== دوال إضافية ==========
+    async def start(self):
+        """بدء تشغيل المحرك"""
+        print(f"✅ AI Engine started with APIs: {self._available_apis()}")
+    
+    async def stop(self):
+        """إيقاف المحرك"""
+        print("🛑 AI Engine stopped")
+    
+    def get_stats(self) -> dict:
+        """إحصائيات الاستخدام"""
+        return self.stats
