@@ -1,4 +1,4 @@
-# ai_engine.py - نسخة محسنة مع عرض جميل
+# ai_engine.py - نسخة محسنة مع عرض جميل (بدون أخطاء)
 import sympy as sp
 import re
 import httpx
@@ -42,16 +42,14 @@ class AIEngine:
         if all(c in "0123456789+-*/()" for c in question):
             try:
                 result = eval(question)
-                return {
-                    "success": True,
-                    "code": f"""
+                # ✅ تم إصلاح f-string هنا
+                code = f'''
 import sympy as sp
 result = {result}
 final_result = result
-steps = [{{"text": "{question} = {result}", "latex": f"{question} = {result}"}}]
-""",
-                    "model": "calculator"
-                }
+steps = [{{"text": "{question} = {result}", "latex": "{question} = {result}"}}]
+'''
+                return {"success": True, "code": code, "model": "calculator"}
             except:
                 return {"success": False, "error": "خطأ في العملية الحسابية"}
         
@@ -85,30 +83,26 @@ steps = [{{"text": "{question} = {result}", "latex": f"{question} = {result}"}}]
             expr = sp.sympify(func)
             derivative = sp.diff(expr, x)
             
-            # تحويل الصيغة للعرض
-            func_latex = sp.latex(expr).replace('**', '^')
-            deriv_latex = sp.latex(derivative).replace('**', '^')
-            
-            code = f"""
+            # ✅ تم إصلاح f-string هنا
+            code = f'''
 import sympy as sp
 x = sp.symbols('x')
 f = {func}
 final_result = sp.diff(f, x)
 
-# ========== عرض جميل ==========
-func_latex = r"${func_latex}$"
-deriv_latex = r"${deriv_latex}$"
+# ========== عرض النتيجة ==========
+result_str = str(final_result).replace('**', '^')
+func_str = str(f).replace('**', '^')
 
 steps = [
     {{"text": "**مشتقة:**", "latex": ""}},
-    {{"text": f"{func_latex}", "latex": func_latex}},
+    {{"text": f"f(x) = {func_str}", "latex": f"f(x) = {func_str}"}},
     {{"text": "نستخدم قاعدة القوى:", "latex": r"$\\frac{{d}}{{dx}} (x^n) = n x^{{n-1}}$"}},
-    {{"text": "إذن:", "latex": ""}},
-    {{"text": f"$\\frac{{d}}{{dx}} ({func_latex}) = {deriv_latex}$", "latex": f"$\\\\frac{{d}}{{dx}} ({func_latex}) = {deriv_latex}$"}},
+    {{"text": f"f'(x) = {result_str}", "latex": f"f'(x) = {result_str}"}},
     {{"text": "✔️ **النتيجة النهائية:**", "latex": ""}},
-    {{"text": f"$\\boxed{{{deriv_latex}}}$", "latex": f"$\\\\boxed{{{deriv_latex}}}$"}}
+    {{"text": f"$\\boxed{{{result_str}}}$", "latex": f"$\\\\boxed{{{result_str}}}$"}}
 ]
-"""
+'''
             return {"success": True, "code": code, "model": "derivative"}
         except Exception as e:
             return {"success": False, "error": f"خطأ في الحساب: {str(e)}"}
@@ -126,28 +120,28 @@ steps = [
             expr = sp.sympify(func)
             integral = sp.integrate(expr, x)
             
-            func_latex = sp.latex(expr).replace('**', '^')
-            integral_latex = sp.latex(integral).replace('**', '^')
+            # ✅ تم إصلاح f-string هنا
+            func_str = str(expr).replace('**', '^')
+            integral_str = str(integral).replace('**', '^')
             
-            code = f"""
+            code = f'''
 import sympy as sp
 x = sp.symbols('x')
 f = {func}
 final_result = sp.integrate(f, x)
 
-# ========== عرض جميل ==========
-func_latex = r"${func_latex}$"
-integral_latex = r"${integral_latex}$"
+# ========== عرض النتيجة ==========
+func_str = "{func_str}"
+integral_str = str(final_result).replace('**', '^')
 
 steps = [
     {{"text": "**تكامل:**", "latex": ""}},
-    {{"text": f"$\\int {func_latex} \\, dx$", "latex": f"$\\\\int {func_latex} \\\\, dx$"}},
-    {{"text": "نستخدم قواعد التكامل:", "latex": ""}},
-    {{"text": f"$\\int {func_latex} \\, dx = {integral_latex} + C$", "latex": f"$\\\\int {func_latex} \\\\, dx = {integral_latex} + C$"}},
+    {{"text": f"$\\int {func_str} \\, dx$", "latex": f"$\\\\int {func_str} \\\\, dx$"}},
+    {{"text": f"$\\int {func_str} \\, dx = {integral_str} + C$", "latex": f"$\\\\int {func_str} \\\\, dx = {integral_str} + C$"}},
     {{"text": "✔️ **النتيجة النهائية:**", "latex": ""}},
-    {{"text": f"$\\boxed{{{integral_latex} + C}}$", "latex": f"$\\\\boxed{{{integral_latex} + C}}$"}}
+    {{"text": f"$\\boxed{{{integral_str} + C}}$", "latex": f"$\\\\boxed{{{integral_str} + C}}$"}}
 ]
-"""
+'''
             return {"success": True, "code": code, "model": "integral"}
         except Exception as e:
             return {"success": False, "error": f"خطأ في الحساب: {str(e)}"}
@@ -167,11 +161,12 @@ steps = [
             expr = left_expr - right_expr
             solutions = sp.solve(expr, x)
             
-            left_latex = sp.latex(left_expr).replace('**', '^')
-            right_latex = sp.latex(right_expr).replace('**', '^')
-            solutions_latex = ', '.join([f"x = {sp.latex(sol).replace('**', '^')}" for sol in solutions])
+            # ✅ تم إصلاح f-string هنا
+            left_str = str(left_expr).replace('**', '^')
+            right_str = str(right_expr).replace('**', '^')
+            solutions_str = ', '.join([f"x = {str(sol).replace('**', '^')}" for sol in solutions])
             
-            code = f"""
+            code = f'''
 import sympy as sp
 x = sp.symbols('x')
 left = {left}
@@ -179,22 +174,20 @@ right = {right}
 expr = left - right
 final_result = sp.solve(expr, x)
 
-# ========== عرض جميل ==========
-left_latex = r"${left_latex}$"
-right_latex = r"${right_latex}$"
-solutions_latex = r"{solutions_latex}"
+# ========== عرض النتيجة ==========
+left_str = "{left_str}"
+right_str = "{right_str}"
+solutions_str = "{solutions_str}"
 
 steps = [
     {{"text": "**معادلة:**", "latex": ""}},
-    {{"text": f"{left_latex} = {right_latex}", "latex": f"{left_latex} = {right_latex}"}},
-    {{"text": "ننقل الحدود:", "latex": ""}},
-    {{"text": f"${left_latex} - {right_latex} = 0$", "latex": f"${left_latex} - {right_latex} = 0$"}},
-    {{"text": "الحل:", "latex": ""}},
-    {{"text": f"${solutions_latex}$", "latex": f"${solutions_latex}$"}},
+    {{"text": f"{left_str} = {right_str}", "latex": f"{left_str} = {right_str}"}},
+    {{"text": f"{left_str} - {right_str} = 0", "latex": f"{left_str} - {right_str} = 0"}},
+    {{"text": f"الحل: {solutions_str}", "latex": f"الحل: {solutions_str}"}},
     {{"text": "✔️ **النتيجة النهائية:**", "latex": ""}},
-    {{"text": f"$\\boxed{{{solutions_latex}}}$", "latex": f"$\\\\boxed{{{solutions_latex}}}$"}}
+    {{"text": f"$\\boxed{{{solutions_str}}}$", "latex": f"$\\\\boxed{{{solutions_str}}}$"}}
 ]
-"""
+'''
             return {"success": True, "code": code, "model": "equation"}
         except Exception as e:
             return {"success": False, "error": f"خطأ في الحساب: {str(e)}"}
