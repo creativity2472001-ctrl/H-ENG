@@ -1,4 +1,4 @@
-# ai_engine.py - نسخة مصححة
+# ai_engine.py - نسخة محسنة مع عرض جميل
 import sympy as sp
 import re
 import httpx
@@ -48,7 +48,7 @@ class AIEngine:
 import sympy as sp
 result = {result}
 final_result = result
-steps = [{{"text": "{question} = {result}"}}]
+steps = [{{"text": "{question} = {result}", "latex": f"{question} = {result}"}}]
 """,
                     "model": "calculator"
                 }
@@ -70,7 +70,7 @@ steps = [{{"text": "{question} = {result}"}}]
         return {"success": False, "error": "لم يتم التعرف على نوع المسألة"}
     
     async def _handle_derivative(self, question):
-        """حل المشتقات"""
+        """حل المشتقات مع عرض جميل"""
         # استخراج الدالة
         func_match = re.search(r'([a-zA-Z0-9\*\-\+\/\(\)]+)', question)
         if not func_match:
@@ -81,19 +81,32 @@ steps = [{{"text": "{question} = {result}"}}]
             func = func + '*x' if func.isdigit() else func
         
         try:
-            # ✅ التعديل المهم: استخدام sympify بدلاً من eval
             x = sp.symbols('x')
             expr = sp.sympify(func)
             derivative = sp.diff(expr, x)
+            
+            # تحويل الصيغة للعرض
+            func_latex = sp.latex(expr).replace('**', '^')
+            deriv_latex = sp.latex(derivative).replace('**', '^')
             
             code = f"""
 import sympy as sp
 x = sp.symbols('x')
 f = {func}
 final_result = sp.diff(f, x)
+
+# ========== عرض جميل ==========
+func_latex = r"${func_latex}$"
+deriv_latex = r"${deriv_latex}$"
+
 steps = [
-    {{"text": "الدالة: f(x) = {func}", "latex": sp.latex(f)}},
-    {{"text": "المشتقة: f'(x) = {derivative}", "latex": sp.latex(final_result)}}
+    {{"text": "**مشتقة:**", "latex": ""}},
+    {{"text": f"{func_latex}", "latex": func_latex}},
+    {{"text": "نستخدم قاعدة القوى:", "latex": r"$\\frac{{d}}{{dx}} (x^n) = n x^{{n-1}}$"}},
+    {{"text": "إذن:", "latex": ""}},
+    {{"text": f"$\\frac{{d}}{{dx}} ({func_latex}) = {deriv_latex}$", "latex": f"$\\\\frac{{d}}{{dx}} ({func_latex}) = {deriv_latex}$"}},
+    {{"text": "✔️ **النتيجة النهائية:**", "latex": ""}},
+    {{"text": f"$\\boxed{{{deriv_latex}}}$", "latex": f"$\\\\boxed{{{deriv_latex}}}$"}}
 ]
 """
             return {"success": True, "code": code, "model": "derivative"}
@@ -101,7 +114,7 @@ steps = [
             return {"success": False, "error": f"خطأ في الحساب: {str(e)}"}
     
     async def _handle_integral(self, question):
-        """حل التكاملات"""
+        """حل التكاملات مع عرض جميل"""
         func_match = re.search(r'([a-zA-Z0-9\*\-\+\/\(\)]+)', question)
         if not func_match:
             return {"success": False, "error": "لم نتمكن من استخراج الدالة"}
@@ -109,19 +122,30 @@ steps = [
         func = func_match.group(1)
         
         try:
-            # ✅ التعديل المهم: استخدام sympify بدلاً من eval
             x = sp.symbols('x')
             expr = sp.sympify(func)
             integral = sp.integrate(expr, x)
+            
+            func_latex = sp.latex(expr).replace('**', '^')
+            integral_latex = sp.latex(integral).replace('**', '^')
             
             code = f"""
 import sympy as sp
 x = sp.symbols('x')
 f = {func}
 final_result = sp.integrate(f, x)
+
+# ========== عرض جميل ==========
+func_latex = r"${func_latex}$"
+integral_latex = r"${integral_latex}$"
+
 steps = [
-    {{"text": "الدالة: f(x) = {func}", "latex": sp.latex(f)}},
-    {{"text": "التكامل: ∫f(x)dx = {integral} + C", "latex": sp.latex(final_result) + " + C"}}
+    {{"text": "**تكامل:**", "latex": ""}},
+    {{"text": f"$\\int {func_latex} \\, dx$", "latex": f"$\\\\int {func_latex} \\\\, dx$"}},
+    {{"text": "نستخدم قواعد التكامل:", "latex": ""}},
+    {{"text": f"$\\int {func_latex} \\, dx = {integral_latex} + C$", "latex": f"$\\\\int {func_latex} \\\\, dx = {integral_latex} + C$"}},
+    {{"text": "✔️ **النتيجة النهائية:**", "latex": ""}},
+    {{"text": f"$\\boxed{{{integral_latex} + C}}$", "latex": f"$\\\\boxed{{{integral_latex} + C}}$"}}
 ]
 """
             return {"success": True, "code": code, "model": "integral"}
@@ -129,7 +153,7 @@ steps = [
             return {"success": False, "error": f"خطأ في الحساب: {str(e)}"}
     
     async def _handle_equation(self, question):
-        """حل المعادلات"""
+        """حل المعادلات مع عرض جميل"""
         eq_match = re.search(r'([^=]+)=([^=]+)', question)
         if not eq_match:
             return {"success": False, "error": "صيغة المعادلة غير صحيحة"}
@@ -137,12 +161,15 @@ steps = [
         left, right = eq_match.groups()
         
         try:
-            # ✅ التعديل المهم: استخدام sympify بدلاً من eval
             x = sp.symbols('x')
             left_expr = sp.sympify(left)
             right_expr = sp.sympify(right)
             expr = left_expr - right_expr
             solutions = sp.solve(expr, x)
+            
+            left_latex = sp.latex(left_expr).replace('**', '^')
+            right_latex = sp.latex(right_expr).replace('**', '^')
+            solutions_latex = ', '.join([f"x = {sp.latex(sol).replace('**', '^')}" for sol in solutions])
             
             code = f"""
 import sympy as sp
@@ -151,9 +178,21 @@ left = {left}
 right = {right}
 expr = left - right
 final_result = sp.solve(expr, x)
+
+# ========== عرض جميل ==========
+left_latex = r"${left_latex}$"
+right_latex = r"${right_latex}$"
+solutions_latex = r"{solutions_latex}"
+
 steps = [
-    {{"text": "المعادلة: {left} = {right}", "latex": sp.latex(sp.Eq(left, right))}},
-    {{"text": f"الحل: x = {{final_result}}", "latex": f"x = {{final_result}}"}}
+    {{"text": "**معادلة:**", "latex": ""}},
+    {{"text": f"{left_latex} = {right_latex}", "latex": f"{left_latex} = {right_latex}"}},
+    {{"text": "ننقل الحدود:", "latex": ""}},
+    {{"text": f"${left_latex} - {right_latex} = 0$", "latex": f"${left_latex} - {right_latex} = 0$"}},
+    {{"text": "الحل:", "latex": ""}},
+    {{"text": f"${solutions_latex}$", "latex": f"${solutions_latex}$"}},
+    {{"text": "✔️ **النتيجة النهائية:**", "latex": ""}},
+    {{"text": f"$\\boxed{{{solutions_latex}}}$", "latex": f"$\\\\boxed{{{solutions_latex}}}$"}}
 ]
 """
             return {"success": True, "code": code, "model": "equation"}
