@@ -1,4 +1,4 @@
-# main.py - الإصدار النهائي المتوافق (v1.0.0)
+# main.py - الإصدار النهائي الكامل مع جميع التحسينات (v1.0.0)
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -46,6 +46,8 @@ class StepResponse(BaseModel):
                 )
             elif isinstance(step, tuple) and len(step) == 2:
                 return cls(description=str(step[0]), latex=str(step[1]))
+            elif isinstance(step, tuple) and len(step) == 3:
+                return cls(description=str(step[0]), latex=str(step[1]))
             elif isinstance(step, dict):
                 return cls(
                     description=step.get("text", step.get("description", "")), 
@@ -61,11 +63,12 @@ class SolveResponse(BaseModel):
     result: Optional[str] = None
     steps: List[StepResponse] = []
     model: str = "unknown"
-    time: float
+    time: float  # الوقت الإجمالي للعملية
     error: Optional[str] = None
     from_cache: bool = False
-    execution_time: Optional[float] = None
     warnings: List[str] = []
+    ai_error: Optional[str] = None
+    math_error: Optional[str] = None
 
 # ========== إدارة دورة حياة التطبيق ==========
 @asynccontextmanager
@@ -176,10 +179,18 @@ try:
 except Exception as e:
     print(f"⚠️ تحذير: فشل تحميل المجلد الثابت: {e}")
 
-# ✅ تحسين: نقطة نهاية للصفحة الرئيسية
+# ========== الصفحة الرئيسية المحسنة ==========
 @app.get("/", response_class=HTMLResponse)
 async def root():
-    """الصفحة الرئيسية"""
+    """الصفحة الرئيسية مع عرض التحذيرات"""
+    warnings_html = ""
+    if hasattr(app.state, 'warnings') and app.state.warnings:
+        warnings_html = '<div style="background: #fff3cd; color: #856404; padding: 15px; border-radius: 10px; margin-bottom: 20px;">'
+        warnings_html += '<h4>⚠️ تحذيرات التشغيل:</h4><ul>'
+        for w in app.state.warnings:
+            warnings_html += f'<li>{w}</li>'
+        warnings_html += '</ul></div>'
+    
     return HTMLResponse(content=f"""
     <!DOCTYPE html>
     <html dir="rtl">
@@ -193,12 +204,20 @@ async def root():
             h1 {{ color: #333; text-align: center; margin-bottom: 20px; }}
             .version {{ color: #666; text-align: center; margin-bottom: 30px; }}
             .status {{ background: #e8f5e9; color: #2e7d32; padding: 15px; border-radius: 10px; margin-bottom: 20px; text-align: center; }}
+            .warnings {{ background: #fff3cd; color: #856404; padding: 15px; border-radius: 10px; margin-bottom: 20px; }}
             textarea {{ width: 100%; padding: 15px; border: 2px solid #e0e0e0; border-radius: 10px; font-size: 1.1em; margin-bottom: 20px; resize: vertical; }}
-            button {{ background: #667eea; color: white; border: none; padding: 15px 30px; border-radius: 10px; font-size: 1.2em; cursor: pointer; width: 100%; }}
+            textarea:focus {{ outline: none; border-color: #667eea; }}
+            button {{ background: #667eea; color: white; border: none; padding: 15px 30px; border-radius: 10px; font-size: 1.2em; cursor: pointer; width: 100%; transition: background 0.3s; }}
             button:hover {{ background: #5a67d8; }}
+            button:disabled {{ background: #ccc; cursor: not-allowed; }}
             .result {{ margin-top: 20px; padding: 20px; border-radius: 10px; background: #f5f5f5; }}
             .error {{ color: #dc3545; background: #ffe6e8; padding: 15px; border-radius: 10px; }}
             .step {{ padding: 10px; border-right: 3px solid #667eea; background: white; margin: 10px 0; border-radius: 5px; }}
+            .latex {{ font-family: monospace; background: #f1f1f1; padding: 5px; border-radius: 3px; }}
+            .info {{ color: #666; font-size: 0.9em; margin-top: 10px; }}
+            .examples {{ margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 10px; }}
+            .example-btn {{ background: #e9ecef; color: #495057; border: none; padding: 8px 15px; margin: 5px; border-radius: 5px; cursor: pointer; }}
+            .example-btn:hover {{ background: #dee2e6; }}
         </style>
     </head>
     <body>
@@ -207,16 +226,32 @@ async def root():
             <div class="version">الإصدار {VERSION}</div>
             <div class="status">✅ الخادم يعمل بنجاح</div>
             
+            {warnings_html}
+            
+            <div class="examples">
+                <strong>📝 أمثلة جاهزة:</strong>
+                <button class="example-btn" onclick="setExample('مشتقة x**2 + 2x')">مشتقة</button>
+                <button class="example-btn" onclick="setExample('تكامل sin(x)')">تكامل</button>
+                <button class="example-btn" onclick="setExample('حل x**2 - 4 = 0')">معادلة</button>
+                <button class="example-btn" onclick="setExample('5 + 3 * 2')">آلة حاسبة</button>
+                <button class="example-btn" onclick="setExample('مشتقة sin(x) * cos(x)')">مشتقة مركبة</button>
+            </div>
+            
             <textarea id="question" rows="4" placeholder="اكتب سؤالك الرياضي هنا..."></textarea>
-            <button onclick="solve()">حل المسألة</button>
+            <button onclick="solve()" id="solveBtn">حل المسألة</button>
             
             <div id="result" class="result" style="display: none;"></div>
         </div>
 
         <script>
+            function setExample(text) {{
+                document.getElementById('question').value = text;
+            }}
+            
             async function solve() {{
                 const question = document.getElementById('question').value;
                 const resultDiv = document.getElementById('result');
+                const solveBtn = document.getElementById('solveBtn');
                 
                 if (!question.trim()) {{
                     alert('الرجاء إدخال سؤال');
@@ -225,6 +260,7 @@ async def root():
                 
                 resultDiv.style.display = 'block';
                 resultDiv.innerHTML = '<p>⏳ جاري المعالجة...</p>';
+                solveBtn.disabled = true;
                 
                 try {{
                     const response = await fetch('/solve', {{
@@ -236,7 +272,14 @@ async def root():
                     
                     if (data.success) {{
                         let html = '<h3>✅ النتيجة:</h3>';
-                        html += `<p style="font-size: 1.2em;">${{data.result || 'تم الحل'}}</p>`;
+                        html += `<p style="font-size: 1.2em; color: #28a745;">${{data.result || 'تم الحل'}}</p>`;
+                        
+                        if (data.warnings && data.warnings.length > 0) {{
+                            html += '<div style="background: #fff3cd; color: #856404; padding: 10px; border-radius: 5px; margin: 10px 0;">';
+                            html += '<strong>⚠️ تحذيرات:</strong><ul>';
+                            data.warnings.forEach(w => html += `<li>${{w}}</li>`);
+                            html += '</ul></div>';
+                        }}
                         
                         if (data.steps && data.steps.length > 0) {{
                             html += '<h4>📝 خطوات الحل:</h4>';
@@ -244,21 +287,30 @@ async def root():
                                 html += '<div class="step">';
                                 html += `<div>${{step.description}}</div>`;
                                 if (step.latex) {{
-                                    html += `<div style="font-family: monospace;">📐 ${{step.latex}}</div>`;
+                                    html += `<div class="latex">📐 ${{step.latex}}</div>`;
                                 }}
                                 html += '</div>';
                             }});
                         }}
                         
-                        html += `<p style="color: #666;">⏱️ وقت التنفيذ: ${{data.time}} ثانية</p>`;
-                        html += `<p style="color: #666;">🤖 المحرك: ${{data.model}}</p>`;
+                        html += `<p class="info">⏱️ وقت التنفيذ: ${{data.time}} ثانية</p>`;
+                        html += `<p class="info">🤖 المحرك: ${{data.model}} ${{data.from_cache ? '(من الذاكرة المؤقتة)' : ''}}</p>`;
                         
                         resultDiv.innerHTML = html;
                     }} else {{
-                        resultDiv.innerHTML = `<div class="error">❌ خطأ: ${{data.error || 'حدث خطأ'}}</div>`;
+                        let errorHtml = `<div class="error">❌ خطأ: ${{data.error || 'حدث خطأ'}}</div>`;
+                        if (data.ai_error) {{
+                            errorHtml += `<div style="background: #fff3cd; margin-top: 10px; padding: 10px; border-radius: 5px;">⚠️ خطأ AI: ${{data.ai_error}}</div>`;
+                        }}
+                        if (data.math_error) {{
+                            errorHtml += `<div style="background: #fff3cd; margin-top: 10px; padding: 10px; border-radius: 5px;">⚠️ خطأ رياضي: ${{data.math_error}}</div>`;
+                        }}
+                        resultDiv.innerHTML = errorHtml;
                     }}
                 }} catch (error) {{
                     resultDiv.innerHTML = `<div class="error">❌ خطأ في الاتصال: ${{error.message}}</div>`;
+                }} finally {{
+                    solveBtn.disabled = false;
                 }}
             }}
         </script>
@@ -266,12 +318,14 @@ async def root():
     </html>
     """)
 
-# ========== ✅ نقطة نهاية حل المسائل (متوافقة مع التعديلات) ==========
+# ========== نقطة نهاية حل المسائل المحسنة ==========
 @app.post("/solve", response_model=SolveResponse)
 async def solve(request: SolveRequest):
-    """حل أي مسألة رياضية"""
+    """حل أي مسألة رياضية مع تجميع الأخطاء والتحذيرات"""
     start_time = time.time()
     warnings = []
+    ai_error = None
+    math_error = None
     
     try:
         question = request.question.strip()
@@ -283,124 +337,247 @@ async def solve(request: SolveRequest):
                 time=round(time.time() - start_time, 4)
             )
         
-        # ✅ 1. AI Engine يولد الكود
+        # 1. AI Engine يولد الكود
+        ai_result = None
         try:
             ai_result = await asyncio.wait_for(
                 app.state.ai_engine.generate_code(question),
                 timeout=30.0
             )
         except asyncio.TimeoutError:
+            ai_error = "انتهت مهلة توليد الكود (30 ثانية)"
             return SolveResponse(
                 success=False,
-                error="انتهت مهلة توليد الكود",
-                time=round(time.time() - start_time, 4)
+                error="فشل في توليد الكود",
+                ai_error=ai_error,
+                time=round(time.time() - start_time, 4),
+                warnings=warnings
             )
-        
-        if not ai_result or not ai_result.get("success"):
+        except Exception as e:
+            ai_error = str(e)
             return SolveResponse(
                 success=False,
-                error=ai_result.get("error", "فشل في توليد الكود"),
-                time=round(time.time() - start_time, 4)
+                error="فشل في توليد الكود",
+                ai_error=ai_error,
+                time=round(time.time() - start_time, 4),
+                warnings=warnings
             )
         
-        # ✅ 2. Math Engine ينفذ الكود
+        if not ai_result or not isinstance(ai_result, dict):
+            ai_error = "نتيجة غير صالحة من AI Engine"
+            return SolveResponse(
+                success=False,
+                error=ai_error,
+                ai_error=ai_error,
+                time=round(time.time() - start_time, 4),
+                warnings=warnings
+            )
+        
+        if not ai_result.get("success"):
+            ai_error = ai_result.get("error", "فشل في توليد الكود")
+            return SolveResponse(
+                success=False,
+                error=ai_error,
+                ai_error=ai_error,
+                time=round(time.time() - start_time, 4),
+                warnings=warnings
+            )
+        
+        # التحقق من وجود الكود
         code = ai_result.get("code")
         if not code:
-            warnings.append("تم توليد الكود ولكن لا يوجد مخرجات")
+            warnings.append("تم توليد الكود بنجاح ولكن لا يوجد مخرجات")
         
+        # 2. Math Engine ينفذ الكود
+        math_result = None
         try:
             math_result = await asyncio.wait_for(
                 app.state.math_engine.execute(code if code else ""),
                 timeout=30.0
             )
         except asyncio.TimeoutError:
+            math_error = "انتهت مهلة تنفيذ الكود (30 ثانية)"
             return SolveResponse(
                 success=False,
-                error="انتهت مهلة تنفيذ الكود",
-                time=round(time.time() - start_time, 4)
+                error="فشل في تنفيذ الكود",
+                ai_error=ai_error,
+                math_error=math_error,
+                time=round(time.time() - start_time, 4),
+                warnings=warnings
+            )
+        except Exception as e:
+            math_error = str(e)
+            return SolveResponse(
+                success=False,
+                error="فشل في تنفيذ الكود",
+                ai_error=ai_error,
+                math_error=math_error,
+                time=round(time.time() - start_time, 4),
+                warnings=warnings
             )
         
-        # ✅ 3. تحويل الخطوات
-        steps = []
-        if math_result and hasattr(math_result, 'steps'):
-            for step in math_result.steps:
-                steps.append(StepResponse.from_step(step))
+        if not math_result:
+            math_error = "نتيجة غير صالحة من Math Engine"
+            return SolveResponse(
+                success=False,
+                error=math_error,
+                ai_error=ai_error,
+                math_error=math_error,
+                time=round(time.time() - start_time, 4),
+                warnings=warnings
+            )
         
-        # ✅ 4. تجهيز الرد
+        # تحويل الخطوات
+        steps = []
+        if math_result and hasattr(math_result, 'steps') and math_result.steps:
+            for step in math_result.steps:
+                try:
+                    steps.append(StepResponse.from_step(step))
+                except Exception as e:
+                    warnings.append(f"فشل تحويل خطوة: {str(e)}")
+        
+        # تجهيز الرد النهائي
+        total_time = round(time.time() - start_time, 4)
+        
         return SolveResponse(
             success=math_result.success if math_result else False,
             result=math_result.result_str if math_result and math_result.success else None,
             steps=steps,
             model=ai_result.get("model", "ai"),
             from_cache=ai_result.get("from_cache", False),
-            time=round(time.time() - start_time, 4),
-            execution_time=round(time.time() - start_time, 4),
+            time=total_time,
             error=math_result.error if math_result and not math_result.success else None,
-            warnings=warnings
+            warnings=warnings,
+            ai_error=ai_error,
+            math_error=math_error
         )
         
     except Exception as e:
+        # معالجة أي أخطاء غير متوقعة
+        error_msg = f"خطأ غير متوقع: {str(e)}"
         if DEBUG:
             import traceback
             traceback.print_exc()
         
         return SolveResponse(
             success=False,
-            error=f"خطأ غير متوقع: {str(e)}",
+            error=error_msg,
             time=round(time.time() - start_time, 4),
-            warnings=warnings
+            warnings=warnings,
+            ai_error=ai_error,
+            math_error=math_error
         )
 
-# ========== نقطة نهاية فحص الصحة ==========
+# ========== نقطة نهاية فحص الصحة المحسنة ==========
 @app.get("/health")
 async def health():
-    """فحص صحة الخادم"""
+    """فحص صحة الخادم والمحركات"""
     uptime = time.time() - (app.state.start_time if hasattr(app.state, 'start_time') else START_TIME)
+    
+    # فحص حالة المحركات
+    ai_status = "ready"
+    math_status = "ready"
+    
+    try:
+        if hasattr(app.state.ai_engine, 'ready'):
+            ai_status = "ready" if app.state.ai_engine.ready else "not_ready"
+    except:
+        ai_status = "unknown"
+    
+    try:
+        if hasattr(app.state.math_engine, 'get_stats'):
+            math_status = "ready"
+    except:
+        math_status = "unknown"
     
     return JSONResponse({
         "status": "healthy",
         "version": VERSION,
         "debug": DEBUG,
+        "ai_engine": ai_status,
+        "math_engine": math_status,
         "uptime": round(uptime, 2),
-        "timestamp": time.time()
+        "uptime_str": f"{int(uptime // 3600):02d}:{int((uptime % 3600) // 60):02d}:{int(uptime % 60):02d}",
+        "timestamp": time.time(),
+        "warnings": getattr(app.state, 'warnings', [])
     })
 
-# ========== نقطة نهاية الإحصائيات ==========
+# ========== نقطة نهاية الإحصائيات المحسنة ==========
 @app.get("/stats")
 async def get_stats():
-    """إحصائيات المحركات"""
+    """إحصائيات المحركات مع تفاصيل أكثر"""
     stats = {
         "success": True,
         "stats": {
-            "uptime": time.time() - (app.state.start_time if hasattr(app.state, 'start_time') else START_TIME)
+            "uptime": time.time() - (app.state.start_time if hasattr(app.state, 'start_time') else START_TIME),
+            "warnings": getattr(app.state, 'warnings', [])
         }
     }
     
     # إحصائيات AI Engine
     if hasattr(app.state.ai_engine, 'get_stats'):
-        stats["stats"]["ai_engine"] = app.state.ai_engine.get_stats()
+        try:
+            stats["stats"]["ai_engine"] = app.state.ai_engine.get_stats()
+        except Exception as e:
+            stats["stats"]["ai_engine"] = {"error": str(e)}
+    else:
+        stats["stats"]["ai_engine"] = {"status": "stats_not_available"}
     
     # إحصائيات Math Engine
     if hasattr(app.state.math_engine, 'get_stats'):
-        stats["stats"]["math_engine"] = app.state.math_engine.get_stats()
+        try:
+            stats["stats"]["math_engine"] = app.state.math_engine.get_stats()
+        except Exception as e:
+            stats["stats"]["math_engine"] = {"error": str(e)}
+    else:
+        stats["stats"]["math_engine"] = {"status": "stats_not_available"}
     
     return JSONResponse(stats)
 
-# ========== نقطة نهاية الاختبار ==========
+# ========== نقطة نهاية الاختبار المحسنة ==========
 @app.get("/test")
 async def test():
-    """صفحة اختبار بسيطة"""
+    """صفحة اختبار متكاملة"""
+    warnings_html = ""
+    if hasattr(app.state, 'warnings') and app.state.warnings:
+        warnings_html = '<div style="background: #fff3cd; color: #856404; padding: 10px; border-radius: 5px; margin-bottom: 20px;">'
+        warnings_html += '<h4>⚠️ تحذيرات التشغيل:</h4><ul>'
+        for w in app.state.warnings:
+            warnings_html += f'<li>{w}</li>'
+        warnings_html += '</ul></div>'
+    
     return HTMLResponse(content=f"""
     <html dir="rtl">
-    <head><title>اختبار {APP_NAME}</title></head>
-    <body style="font-family: Arial; margin: 40px;">
-        <h1>🧪 صفحة اختبار {APP_NAME}</h1>
-        <p>✅ التطبيق يعمل بشكل طبيعي</p>
-        <ul>
-            <li><a href="/">الصفحة الرئيسية</a></li>
-            <li><a href="/health">فحص الصحة</a></li>
-            <li><a href="/stats">الإحصائيات</a></li>
-        </ul>
+    <head>
+        <title>اختبار {APP_NAME}</title>
+        <style>
+            body {{ font-family: Arial; margin: 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; }}
+            .container {{ max-width: 800px; margin: auto; background: white; padding: 30px; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }}
+            h1 {{ color: #333; text-align: center; }}
+            .endpoints {{ background: #f5f5f5; padding: 20px; border-radius: 10px; margin: 20px 0; }}
+            .endpoint {{ padding: 10px; border-bottom: 1px solid #ddd; }}
+            code {{ background: #e0e0e0; padding: 2px 5px; border-radius: 3px; }}
+            .success {{ color: green; font-weight: bold; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🧪 {APP_NAME} - صفحة الاختبار</h1>
+            <p class="success">✅ التطبيق يعمل بشكل طبيعي</p>
+            
+            {warnings_html}
+            
+            <div class="endpoints">
+                <h3>📌 النقاط المتاحة:</h3>
+                <div class="endpoint"><code>GET  /</code> - الصفحة الرئيسية</div>
+                <div class="endpoint"><code>POST /solve</code> - حل المسائل</div>
+                <div class="endpoint"><code>GET  /health</code> - فحص الصحة</div>
+                <div class="endpoint"><code>GET  /stats</code> - الإحصائيات</div>
+                <div class="endpoint"><code>GET  /test</code> - هذه الصفحة</div>
+            </div>
+            
+            <p><a href="/">العودة للصفحة الرئيسية</a></p>
+        </div>
     </body>
     </html>
     """)
@@ -409,6 +586,11 @@ async def test():
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     error_id = abs(hash(str(exc))) % 10000
+    error_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    print(f"\n❌ خطأ عام {error_id} في {error_time}")
+    print(f"📌 المسار: {request.url.path}")
+    print(f"📝 الخطأ: {str(exc)}")
     
     if DEBUG:
         import traceback
@@ -418,19 +600,23 @@ async def global_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={
             "success": False,
-            "error": f"خطأ داخلي (ID: {error_id})",
-            "detail": str(exc) if DEBUG else None
+            "error": f"خطأ داخلي في الخادم (ID: {error_id})",
+            "detail": str(exc) if DEBUG else None,
+            "path": request.url.path,
+            "timestamp": error_time
         }
     )
 
 # ========== معالج المسارات غير الموجودة ==========
 @app.api_route("/{path_name:path}", methods=["GET", "POST", "PUT", "DELETE"])
-async def not_found_handler(path_name: str):
+async def not_found_handler(request: Request, path_name: str):
     return JSONResponse(
         status_code=404,
         content={
             "success": False,
-            "error": f"المسار '{path_name}' غير موجود"
+            "error": f"المسار '{path_name}' غير موجود",
+            "available_endpoints": ["/", "/solve", "/health", "/stats", "/test"],
+            "method": request.method
         }
     )
 
@@ -440,7 +626,11 @@ if __name__ == "__main__":
     print(f"🚀 تشغيل {APP_NAME}")
     print("="*60)
     print(f"📍 http://{HOST}:{PORT}")
+    print(f"🔌 المنفذ: {PORT}")
+    print(f"🔄 إعادة التشغيل التلقائي: {'نعم' if RELOAD else 'لا'}")
+    print(f"⚙️ عدد العمال: {WORKERS}")
     print(f"🔧 وضع التصحيح: {'مفعل' if DEBUG else 'معطل'}")
+    print(f"🌐 النطاقات المسموحة: {ALLOWED_ORIGINS}")
     print("="*60 + "\n")
     
     uvicorn.run(
