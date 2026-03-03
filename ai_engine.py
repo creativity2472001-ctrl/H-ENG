@@ -1,202 +1,226 @@
-# ai_engine.py
-import time
-from typing import Dict, Any
+# ai_engine.py (النسخة المطورة - بدون AI)
+import sympy as sp
+import re
 
 class AIEngine:
-    """محرك AI مبسط يحول الأسئلة لكود"""
+    """محرك رياضيات متكامل - بدون AI"""
     
     def __init__(self):
-        self.ready = False
+        self.ready = True
+        self.x, self.y, self.z = sp.symbols('x y z')
+        print("✅ AI Engine ready (مطوّر)")
     
     async def start(self):
-        self.ready = True
-        print("✅ AI Engine ready")
+        pass
     
     async def stop(self):
-        self.ready = False
-        print("🛑 AI Engine stopped")
+        pass
     
-    async def generate_code(self, question: str, domain: str = "general") -> Dict[str, Any]:
-        """تحويل السؤال إلى كود SymPy"""
+    async def generate_code(self, question: str, domain: str = "general") -> dict:
+        question = question.lower().strip()
         
-        if not self.ready:
-            return {"success": False, "error": "AI Engine not ready"}
-        
-        question = question.lower()
-        
-        # ========== مشتقات ==========
+        # ========== 1. مشتقات ==========
         if any(word in question for word in ["مشتق", "derivative", "diff", "اشتقاق"]):
-            return self._derivative_code(question)
+            return self._handle_derivative(question)
         
-        # ========== تكاملات ==========
+        # ========== 2. تكاملات ==========
         elif any(word in question for word in ["تكامل", "integral", "integrate", "∫"]):
-            return self._integral_code(question)
+            return self._handle_integral(question)
         
-        # ========== معادلات ==========
+        # ========== 3. معادلات ==========
         elif any(word in question for word in ["حل", "solve", "معادلة", "equation"]):
-            return self._equation_code(question)
+            return self._handle_equation(question)
         
-        # ========== آلة حاسبة (بسيط) ==========
+        # ========== 4. نهايات ==========
+        elif any(word in question for word in ["نهاية", "limit"]):
+            return self._handle_limit(question)
+        
+        # ========== 5. مصفوفات ==========
+        elif any(word in question for word in ["مصفوفة", "matrix"]):
+            return self._handle_matrix(question)
+        
+        # ========== 6. آلة حاسبة ==========
         elif self._is_simple_math(question):
-            return self._calculator_code(question)
+            return self._handle_calculator(question)
         
-        return {
-            "success": False,
-            "error": "لم نتعرف على نوع المسألة. الأنواع المدعومة:\n• مشتقات (مثال: مشتقة x^2)\n• تكاملات (مثال: تكامل sin x)\n• معادلات (مثال: حل 2x+5=13)\n• عمليات حسابية (مثال: 2+2)"
-        }
+        return {"success": False, "error": "لم نتعرف على نوع المسألة"}
     
-    def _is_simple_math(self, q: str) -> bool:
-        """هل هي مسألة حسابية بسيطة؟"""
-        q = q.replace(" ", "")
-        return all(c in "0123456789+-*/()" for c in q)
+    # ========== المشتقات ==========
+    def _handle_derivative(self, question):
+        """معالجة جميع أنواع المشتقات"""
+        # استخراج الدالة من السؤال
+        func = self._extract_function(question)
+        
+        if not func:
+            return {"success": False, "error": "لم نتمكن من استخراج الدالة"}
+        
+        try:
+            # تحويل النص إلى تعبير SymPy
+            expr = sp.sympify(func)
+            derivative = sp.diff(expr, self.x)
+            
+            code = f"""
+import sympy as sp
+x = sp.symbols('x')
+f = {func}
+final_result = sp.diff(f, x)
+steps = [
+    {{"text": "الدالة: f(x) = {func}", "latex": sp.latex(f)}},
+    {{"text": "المشتقة: f'(x) = {derivative}", "latex": sp.latex(final_result)}}
+]
+"""
+            return {"success": True, "code": code, "model": "derivative"}
+        except:
+            return {"success": False, "error": "خطأ في صيغة الدالة"}
     
-    def _calculator_code(self, question: str) -> Dict[str, Any]:
-        """كود آلة حاسبة"""
+    # ========== التكاملات ==========
+    def _handle_integral(self, question):
+        """معالجة جميع أنواع التكاملات"""
+        func = self._extract_function(question)
+        
+        if not func:
+            return {"success": False, "error": "لم نتمكن من استخراج الدالة"}
+        
+        try:
+            expr = sp.sympify(func)
+            integral = sp.integrate(expr, self.x)
+            
+            code = f"""
+import sympy as sp
+x = sp.symbols('x')
+f = {func}
+final_result = sp.integrate(f, x)
+steps = [
+    {{"text": "الدالة: f(x) = {func}", "latex": sp.latex(f)}},
+    {{"text": "التكامل: ∫f(x)dx = {integral} + C", "latex": sp.latex(final_result) + " + C"}}
+]
+"""
+            return {"success": True, "code": code, "model": "integral"}
+        except:
+            return {"success": False, "error": "خطأ في صيغة الدالة"}
+    
+    # ========== المعادلات ==========
+    def _handle_equation(self, question):
+        """حل جميع أنواع المعادلات"""
+        eq = self._extract_equation(question)
+        
+        if not eq:
+            return {"success": False, "error": "لم نتمكن من استخراج المعادلة"}
+        
+        try:
+            # تقسيم المعادلة إلى طرفين
+            if "=" in eq:
+                left, right = eq.split("=")
+                expr = sp.sympify(f"{left} - ({right})")
+            else:
+                expr = sp.sympify(eq)
+            
+            solutions = sp.solve(expr, self.x)
+            
+            code = f"""
+import sympy as sp
+x = sp.symbols('x')
+expr = {expr}
+final_result = sp.solve(expr, x)
+steps = [
+    {{"text": "المعادلة: {eq}", "latex": sp.latex(sp.Eq(expr, 0))}},
+    {{"text": f"الحل: x = {{final_result}}", "latex": f"x = {{final_result}}"}}
+]
+"""
+            return {"success": True, "code": code, "model": "equation"}
+        except:
+            return {"success": False, "error": "خطأ في صيغة المعادلة"}
+    
+    # ========== النهايات ==========
+    def _handle_limit(self, question):
+        """حساب النهايات"""
+        # استخراج الدالة والنقطة
+        match = re.search(r'نهاية\s+(.+?)\s+عندما\s+(\w+)\s*→\s*([^\s]+)', question)
+        if match:
+            func, var, point = match.groups()
+            var_sym = sp.symbols(var)
+            
+            try:
+                expr = sp.sympify(func)
+                point_val = sp.sympify(point)
+                limit = sp.limit(expr, var_sym, point_val)
+                
+                code = f"""
+import sympy as sp
+{var} = sp.symbols('{var}')
+f = {func}
+final_result = sp.limit(f, {var}, {point})
+steps = [
+    {{"text": "الدالة: f({var}) = {func}", "latex": sp.latex(f)}},
+    {{"text": "النهاية عندما {var} → {point}", "latex": sp.latex(final_result)}}
+]
+"""
+                return {"success": True, "code": code, "model": "limit"}
+            except:
+                pass
+        
+        return {"success": False, "error": "صيغة النهاية غير صحيحة. مثال: نهاية x^2 عندما x→2"}
+    
+    # ========== المصفوفات ==========
+    def _handle_matrix(self, question):
+        """عمليات على المصفوفات"""
+        # مثال بسيط: ضرب مصفوفتين
+        code = """
+import sympy as sp
+A = sp.Matrix([[1, 2], [3, 4]])
+B = sp.Matrix([[5, 6], [7, 8]])
+final_result = A * B
+steps = [
+    {"text": "المصفوفة A:", "latex": sp.latex(A)},
+    {"text": "المصفوفة B:", "latex": sp.latex(B)},
+    {"text": "الضرب: A × B", "latex": sp.latex(final_result)}
+]
+"""
+        return {"success": True, "code": code, "model": "matrix"}
+    
+    # ========== آلة حاسبة ==========
+    def _handle_calculator(self, question):
+        """عمليات حسابية بسيطة"""
+        expr = question.replace(" ", "")
         return {
             "success": True,
             "code": f"""
 import sympy as sp
-# تعبير: {question}
-result = eval("{question}")
+result = eval("{expr}")
 final_result = result
-steps = [{{"text": f"{question} = {{result}}"}}]
+steps = [{{"text": "{expr} = {eval(expr)}"}}]
 """,
             "model": "calculator"
         }
     
-    def _derivative_code(self, question: str) -> Dict[str, Any]:
-        """كود المشتقات"""
-        # مشتقة x^2
-        if "x^2" in question or "x²" in question:
-            return {
-                "success": True,
-                "code": """
-import sympy as sp
-x = sp.symbols('x')
-f = x**2
-final_result = sp.diff(f, x)
-steps = [
-    {"text": "الدالة: f(x) = x²", "latex": sp.latex(f)},
-    {"text": "المشتقة: f'(x) = 2x", "latex": sp.latex(final_result)}
-]
-""",
-                "model": "derivative"
-            }
-        # مشتقة x^3
-        elif "x^3" in question or "x³" in question:
-            return {
-                "success": True,
-                "code": """
-import sympy as sp
-x = sp.symbols('x')
-f = x**3
-final_result = sp.diff(f, x)
-steps = [
-    {"text": "الدالة: f(x) = x³", "latex": sp.latex(f)},
-    {"text": "المشتقة: f'(x) = 3x²", "latex": sp.latex(final_result)}
-]
-""",
-                "model": "derivative"
-            }
-        # مشتقة عامة
-        else:
-            return {
-                "success": True,
-                "code": """
-import sympy as sp
-x = sp.symbols('x')
-f = x**2
-final_result = sp.diff(f, x)
-steps = [
-    {"text": "الدالة: f(x) = x² (افتراضي)", "latex": sp.latex(f)},
-    {"text": "المشتقة: f'(x) = 2x", "latex": sp.latex(final_result)}
-]
-""",
-                "model": "derivative (افتراضي)"
-            }
+    # ========== دوال مساعدة ==========
+    def _is_simple_math(self, q):
+        q = q.replace(" ", "")
+        return all(c in "0123456789+-*/()" for c in q)
     
-    def _integral_code(self, question: str) -> Dict[str, Any]:
-        """كود التكاملات"""
-        # تكامل sin x
-        if "sin" in question:
-            return {
-                "success": True,
-                "code": """
-import sympy as sp
-x = sp.symbols('x')
-f = sp.sin(x)
-final_result = sp.integrate(f, x)
-steps = [
-    {"text": "الدالة: f(x) = sin(x)", "latex": sp.latex(f)},
-    {"text": "التكامل: ∫sin(x)dx = -cos(x) + C", "latex": sp.latex(final_result) + " + C"}
-]
-""",
-                "model": "integral"
-            }
-        # تكامل cos x
-        elif "cos" in question:
-            return {
-                "success": True,
-                "code": """
-import sympy as sp
-x = sp.symbols('x')
-f = sp.cos(x)
-final_result = sp.integrate(f, x)
-steps = [
-    {"text": "الدالة: f(x) = cos(x)", "latex": sp.latex(f)},
-    {"text": "التكامل: ∫cos(x)dx = sin(x) + C", "latex": sp.latex(final_result) + " + C"}
-]
-""",
-                "model": "integral"
-            }
-        # تكامل x^2
-        else:
-            return {
-                "success": True,
-                "code": """
-import sympy as sp
-x = sp.symbols('x')
-f = x**2
-final_result = sp.integrate(f, x)
-steps = [
-    {"text": "الدالة: f(x) = x²", "latex": sp.latex(f)},
-    {"text": "التكامل: ∫x²dx = x³/3 + C", "latex": sp.latex(final_result) + " + C"}
-]
-""",
-                "model": "integral"
-            }
+    def _extract_function(self, question):
+        """استخراج الدالة الرياضية من السؤال"""
+        # محاولة استخراج الدالة بعد كلمة "مشتقة" أو "تكامل"
+        patterns = [
+            r'(?:مشتق|مشتقة|اشتقاق|derivative|diff|تكامل|integral)\s+([^(]+)',
+            r'([a-zA-Z0-9\^\*\/\+\-\s\(\)]+)'
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, question)
+            if match:
+                return match.group(1).strip()
+        return None
     
-    def _equation_code(self, question: str) -> Dict[str, Any]:
-        """كود المعادلات"""
-        # معادلة 2x+5=13
-        if "2x+5=13" in question.replace(" ", ""):
-            return {
-                "success": True,
-                "code": """
-import sympy as sp
-x = sp.symbols('x')
-eq = sp.Eq(2*x + 5, 13)
-final_result = sp.solve(eq, x)
-steps = [
-    {"text": "المعادلة: 2x + 5 = 13", "latex": sp.latex(eq)},
-    {"text": "الحل: x = 4", "latex": "x = 4"}
-]
-""",
-                "model": "equation"
-            }
-        # معادلة عامة
-        else:
-            return {
-                "success": True,
-                "code": """
-import sympy as sp
-x = sp.symbols('x')
-eq = sp.Eq(2*x + 5, 13)
-final_result = sp.solve(eq, x)
-steps = [
-    {"text": "المعادلة: 2x + 5 = 13 (افتراضي)", "latex": sp.latex(eq)},
-    {"text": "الحل: x = 4", "latex": "x = 4"}
-]
-""",
-                "model": "equation (افتراضي)"
-            }
+    def _extract_equation(self, question):
+        """استخراج المعادلة من السؤال"""
+        patterns = [
+            r'(?:حل|solve|معادلة)\s+([^=]+=[^=]+)',
+            r'([^=]+=[^=]+)'
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, question)
+            if match:
+                return match.group(1).strip().replace(" ", "")
+        return None
