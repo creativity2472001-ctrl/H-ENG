@@ -15,6 +15,24 @@ from pydantic import BaseModel
 from ai_engine import AIEngine
 from math_engine import MathEngine
 
+# ========== إعدادات من config.py (مدمجة) ==========
+# مفاتيح API - تأتي من متغيرات البيئة فقط!
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+
+# تحذيرات إذا كانت المفاتيح فارغة (تنبيه فقط، لا يمنع التشغيل)
+if not GROQ_API_KEY:
+    print("⚠️ تحذير: GROQ_API_KEY غير موجودة - خدمة Groq غير متاحة")
+if not GEMINI_API_KEY:
+    print("⚠️ تحذير: GEMINI_API_KEY غير موجودة - خدمة Gemini غير متاحة")
+if not OPENROUTER_API_KEY:
+    print("⚠️ تحذير: OPENROUTER_API_KEY غير موجودة")
+
+# إعدادات إضافية
+MAX_CODE_LENGTH = 5000      # أقصى طول للكود المسموح به
+CACHE_TTL = 3600            # مدة التخزين المؤقت بالثواني (ساعة واحدة)
+
 # ========== إعدادات التطبيق ==========
 APP_NAME = "ذكي ماتك - مساعد المهندس"
 VERSION = "1.0.0"
@@ -78,11 +96,20 @@ async def lifespan(app: FastAPI):
     print(f"🚀 {APP_NAME} v{VERSION}")
     print("="*60)
     
+    # تمرير المفاتيح إلى AIEngine عند التهيئة
+    # سيتم استخدامها من متغيرات البيئة داخل ai_engine.py
+    
     # تهيئة المحركات
     app.state.ai_engine = AIEngine()
     app.state.math_engine = MathEngine()
     app.state.start_time = time.time()
     app.state.warnings = []
+    
+    # إضافة تحذيرات المفاتيح إلى حالة التطبيق
+    if not GROQ_API_KEY:
+        app.state.warnings.append("GROQ_API_KEY غير موجودة - خدمة Groq غير متاحة")
+    if not GEMINI_API_KEY:
+        app.state.warnings.append("GEMINI_API_KEY غير موجودة - خدمة Gemini غير متاحة")
     
     # بدء تشغيل المحركات
     try:
@@ -113,6 +140,9 @@ async def lifespan(app: FastAPI):
     
     print(f"📍 http://{HOST}:{PORT}")
     print(f"🔧 وضع التصحيح: {'مفعل' if DEBUG else 'معطل'}")
+    print(f"📏 أقصى طول للكود: {MAX_CODE_LENGTH}")
+    print(f"⏱️ مدة التخزين المؤقت: {CACHE_TTL} ثانية")
+    
     if app.state.warnings:
         print("⚠️ تحذيرات:")
         for w in app.state.warnings:
@@ -337,6 +367,14 @@ async def solve(request: SolveRequest):
                 time=round(time.time() - start_time, 4)
             )
         
+        # التحقق من طول الكود (حماية إضافية)
+        if len(question) > MAX_CODE_LENGTH:
+            return SolveResponse(
+                success=False,
+                error=f"السؤال طويل جداً (الحد الأقصى {MAX_CODE_LENGTH} حرف)",
+                time=round(time.time() - start_time, 4)
+            )
+        
         # 1. AI Engine يولد الكود
         ai_result = None
         try:
@@ -499,7 +537,11 @@ async def health():
         "uptime": round(uptime, 2),
         "uptime_str": f"{int(uptime // 3600):02d}:{int((uptime % 3600) // 60):02d}:{int(uptime % 60):02d}",
         "timestamp": time.time(),
-        "warnings": getattr(app.state, 'warnings', [])
+        "warnings": getattr(app.state, 'warnings', []),
+        "config": {
+            "max_code_length": MAX_CODE_LENGTH,
+            "cache_ttl": CACHE_TTL
+        }
     })
 
 # ========== نقطة نهاية الإحصائيات المحسنة ==========
@@ -510,7 +552,11 @@ async def get_stats():
         "success": True,
         "stats": {
             "uptime": time.time() - (app.state.start_time if hasattr(app.state, 'start_time') else START_TIME),
-            "warnings": getattr(app.state, 'warnings', [])
+            "warnings": getattr(app.state, 'warnings', []),
+            "config": {
+                "max_code_length": MAX_CODE_LENGTH,
+                "cache_ttl": CACHE_TTL
+            }
         }
     }
     
@@ -631,6 +677,8 @@ if __name__ == "__main__":
     print(f"⚙️ عدد العمال: {WORKERS}")
     print(f"🔧 وضع التصحيح: {'مفعل' if DEBUG else 'معطل'}")
     print(f"🌐 النطاقات المسموحة: {ALLOWED_ORIGINS}")
+    print(f"📏 أقصى طول للكود: {MAX_CODE_LENGTH}")
+    print(f"⏱️ مدة التخزين المؤقت: {CACHE_TTL} ثانية")
     print("="*60 + "\n")
     
     uvicorn.run(
