@@ -81,8 +81,10 @@ steps = [{{"text": "{question} = {result}"}}]
             func = func + '*x' if func.isdigit() else func
         
         try:
-            expr = eval(f"sp.{func}")
-            derivative = sp.diff(expr, self.x)
+            # ✅ التعديل المهم: استخدام sympify بدلاً من eval
+            x = sp.symbols('x')
+            expr = sp.sympify(func)
+            derivative = sp.diff(expr, x)
             
             code = f"""
 import sympy as sp
@@ -107,8 +109,10 @@ steps = [
         func = func_match.group(1)
         
         try:
-            expr = eval(f"sp.{func}")
-            integral = sp.integrate(expr, self.x)
+            # ✅ التعديل المهم: استخدام sympify بدلاً من eval
+            x = sp.symbols('x')
+            expr = sp.sympify(func)
+            integral = sp.integrate(expr, x)
             
             code = f"""
 import sympy as sp
@@ -133,10 +137,12 @@ steps = [
         left, right = eq_match.groups()
         
         try:
-            left_expr = eval(f"sp.{left}")
-            right_expr = eval(f"sp.{right}")
+            # ✅ التعديل المهم: استخدام sympify بدلاً من eval
+            x = sp.symbols('x')
+            left_expr = sp.sympify(left)
+            right_expr = sp.sympify(right)
             expr = left_expr - right_expr
-            solutions = sp.solve(expr, self.x)
+            solutions = sp.solve(expr, x)
             
             code = f"""
 import sympy as sp
