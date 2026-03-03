@@ -1,14 +1,16 @@
-# math_engine.py - الإصدار النهائي الكامل مع جميع التحسينات
+# math_engine.py - الإصدار النهائي المتوافق مع Windows وجميع الأنظمة
 import sympy as sp
 import traceback
 import ast
 import sys
 import time
+import re  # ✅ إضافة import re (كانت مفقودة)
 from typing import Optional, List, Any, Dict, Union
 from dataclasses import dataclass, field
 import contextlib
 import io
-import signal
+
+# ❌ حذفنا: import signal (غير مدعوم على Windows)
 
 @dataclass
 class Step:
@@ -112,9 +114,8 @@ class MathEngine:
     
     def __init__(self):
         self.execution_count = 0
-        self.max_execution_time = 5  # 5 ثواني كحد أقصى
-        self.timeout_occurred = False
-        print("✅ Math Engine ready - الإصدار النهائي مع دعم المتغيرات المتعددة")
+        self.max_execution_time = 5  # 5 ثواني كحد أقصى (للتوثيق فقط - main.py مسؤول عن timeout)
+        print("✅ Math Engine ready - الإصدار المتوافق مع Windows وجميع الأنظمة")
     
     async def shutdown(self):
         """تنظيف الموارد"""
@@ -206,10 +207,10 @@ class MathEngine:
         
         return variables if variables else ['x']  # افتراضي x إذا لم نجد
     
-    # ========== تنفيذ آمن للكود مع دعم المتغيرات المتعددة ==========
+    # ========== ✅ تنفيذ آمن للكود (بدون signal - يعمل على جميع الأنظمة) ==========
     async def execute(self, code: str) -> ExecutionResult:
         """
-        تنفيذ كود SymPy بشكل آمن مع دعم المتغيرات المتعددة
+        تنفيذ كود SymPy بشكل آمن (متوافق مع جميع الأنظمة)
         
         Args:
             code: كود SymPy (يجب أن يحتوي على final_result و steps)
@@ -218,7 +219,6 @@ class MathEngine:
             ExecutionResult: النتيجة
         """
         self.execution_count += 1
-        self.timeout_occurred = False
         
         # التحقق من الكود أولاً
         errors = self._validate_code(code)
@@ -234,25 +234,10 @@ class MathEngine:
         # التقاط المخرجات
         output = io.StringIO()
         
-        # إعداد معالج timeout
-        def timeout_handler(signum, frame):
-            self.timeout_occurred = True
-            raise TimeoutError("انتهى وقت التنفيذ")
-        
         try:
             with contextlib.redirect_stdout(output):
-                # تنفيذ الكود مع timeout
-                if hasattr(signal, 'SIGALRM'):
-                    # لأنظمة Unix
-                    signal.signal(signal.SIGALRM, timeout_handler)
-                    signal.alarm(self.max_execution_time)
-                
-                try:
-                    # تنفيذ الكود
-                    exec(code, namespace)
-                finally:
-                    if hasattr(signal, 'SIGALRM'):
-                        signal.alarm(0)  # إلغاء التنبيه
+                # ✅ تنفيذ الكود مباشرة - main.py مسؤول عن timeout
+                exec(code, namespace)
             
             # استخراج النتائج
             final_result = namespace.get('final_result')
@@ -276,12 +261,6 @@ class MathEngine:
                     except:
                         result_str = "نتيجة غير قابلة للتحويل"
             
-            if self.timeout_occurred:
-                return ExecutionResult(
-                    success=False,
-                    error=f"❌ انتهت مهلة التنفيذ ({self.max_execution_time} ثانية)"
-                )
-            
             return ExecutionResult(
                 success=True,
                 result=final_result,
@@ -298,11 +277,6 @@ class MathEngine:
             return ExecutionResult(
                 success=False,
                 error="❌ استدعاء متكرر عميق جداً"
-            )
-        except TimeoutError as e:
-            return ExecutionResult(
-                success=False,
-                error=f"❌ {str(e)}"
             )
         except Exception as e:
             return ExecutionResult(
@@ -435,7 +409,6 @@ steps = [
         
         if operation == "derivative" or any(word in query_lower for word in ["مشتق", "derivative", "diff"]):
             # محاولة استخراج الدالة
-            import re
             func_match = re.search(r'[\(\s]*([a-zA-Z0-9\*\-\+\/\(\)\^]+)[\)\s]*', query)
             if func_match:
                 return await self.calculate_derivative(func_match.group(1))
@@ -458,6 +431,5 @@ steps = [
         return {
             "execution_count": self.execution_count,
             "max_execution_time": self.max_execution_time,
-            "status": "ready",
-            "timeout_occurred": self.timeout_occurred
+            "status": "ready"
         }
