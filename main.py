@@ -7,12 +7,11 @@ import uvicorn
 import time
 import os
 
-from ai_solver import AISolver
-from math_solver import MathSolver
-from config import HOST, PORT
+from ai_engine import AIEngine
+from math_engine import MathEngine
 
-# ========== التهيئة ==========
-app = FastAPI(title="ذكي ماتك")
+# ========== تهيئة التطبيق ==========
+app = FastAPI(title="ذكي ماتك - النسخة المبسطة")
 
 app.add_middleware(
     CORSMiddleware,
@@ -25,83 +24,94 @@ os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # ========== المحركات ==========
-ai_solver = AISolver()
-math_solver = MathSolver()
+ai_engine = AIEngine()
+math_engine = MathEngine()
 
-# ========== المسارات ==========
+@app.on_event("startup")
+async def startup():
+    print("\n" + "="*60)
+    print("🚀 ذكي ماتك - النسخة المبسطة")
+    print("="*60)
+    await ai_engine.start()
+    print(f"📍 http://127.0.0.1:8000")
+    print("="*60 + "\n")
+
+@app.on_event("shutdown")
+async def shutdown():
+    await ai_engine.stop()
+    await math_engine.shutdown()
+
 @app.get("/", response_class=HTMLResponse)
 async def root():
+    """الصفحة الرئيسية"""
     try:
         with open("static/index.html", "r", encoding="utf-8") as f:
             return HTMLResponse(content=f.read())
-    except:
-        return HTMLResponse(content="<h1>ذكي ماتك</h1>")
+    except FileNotFoundError:
+        return HTMLResponse(content="<h1>ذكي ماتك</h1><p>ملف الواجهة غير موجود</p>")
 
 @app.post("/solve")
 async def solve(request: Request):
-    """
-    نقطة نهاية واحدة لكل شيء
-    يقرر تلقائياً هل يستخدم AI أم لا
-    """
-    start = time.time()
-    data = await request.json()
-    question = data.get('question', '').strip()
+    """حل أي مسألة رياضية"""
+    start_time = time.time()
     
-    if not question:
-        return {
-            "success": False,
-            "error": "السؤال فارغ",
-            "time": time.time() - start
-        }
-    
-    # 1. محاولة حل المسائل البسيطة (آلة حاسبة)
-    if self._is_simple_math(question):
-        result = self._solve_simple(question)
-        result["time"] = time.time() - start
-        return result
-    
-    # 2. استخدام AI للمسائل المعقدة
-    ai_result = await ai_solver.solve(question)
-    ai_result["time"] = time.time() - start
-    return ai_result
-
-def _is_simple_math(self, q: str) -> bool:
-    """هل هي مسألة حسابية بسيطة؟"""
-    q = q.replace(" ", "")
-    return all(c in "0123456789+-*/()" for c in q)
-
-def _solve_simple(self, q: str) -> dict:
-    """حل مسألة حسابية بسيطة"""
     try:
-        # تقييم آمن
-        result = eval(q, {"__builtins__": {}})
-        return {
-            "success": True,
-            "result": str(result),
-            "steps": [{"text": f"{q} = {result}"}],
-            "model": "calculator"
+        data = await request.json()
+        question = data.get('question', '').strip()
+        
+        if not question:
+            return {
+                "success": False,
+                "error": "السؤال فارغ",
+                "time": time.time() - start_time
+            }
+        
+        # 1. AI Engine يحول السؤال لكود
+        ai_result = await ai_engine.generate_code(question)
+        
+        if not ai_result.get("success"):
+            return {
+                "success": False,
+                "error": ai_result.get("error", "فشل في توليد الكود"),
+                "time": time.time() - start_time
+            }
+        
+        # 2. Math Engine ينفذ الكود
+        math_result = await math_engine.execute(ai_result["code"])
+        
+        # 3. تجهيز النتيجة
+        response = {
+            "success": math_result.success,
+            "result": math_result.result_str if math_result.success else "",
+            "steps": [s.to_dict() for s in math_result.steps] if math_result.success else [],
+            "model": ai_result.get("model", "ai"),
+            "time": time.time() - start_time
         }
-    except:
+        
+        if not math_result.success:
+            response["error"] = math_result.error
+        
+        return response
+        
+    except Exception as e:
         return {
             "success": False,
-            "error": "تعبير غير صحيح"
+            "error": str(e),
+            "time": time.time() - start_time
         }
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "time": time.time()}
+    """فحص صحة الخادم"""
+    return {
+        "status": "healthy",
+        "time": time.time()
+    }
 
-# ========== التشغيل ==========
 if __name__ == "__main__":
-    print("\n" + "="*50)
-    print("🚀 ذكي ماتك - النسخة المبسطة")
-    print("="*50)
-    print(f"📍 http://{HOST}:{PORT}")
-    print("="*50 + "\n")
-    
     uvicorn.run(
         "main:app",
-        host=HOST,
-        port=PORT,
+        host="127.0.0.1",
+        port=8000,
         reload=True
     )
