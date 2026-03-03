@@ -1,21 +1,44 @@
-# ai_engine.py - نسخة محسنة مع عرض جميل (بدون أخطاء)
+# ai_engine.py - الإصدار النهائي المحسن (مع كل الترقيات)
 import sympy as sp
 import re
 import httpx
 import os
+import hashlib
+from typing import Dict, Any, Optional, Tuple, List
 
+# ========== المفاتيح ==========
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
-def clean_input(text):
+# ========== SymPy الآمن ==========
+# قائمة الدوال المسموح بها فقط
+ALLOWED_FUNCTIONS = {
+    'sin': sp.sin, 'cos': sp.cos, 'tan': sp.tan,
+    'cot': sp.cot, 'csc': sp.csc, 'sec': sp.sec,
+    'asin': sp.asin, 'acos': sp.acos, 'atan': sp.atan,
+    'log': sp.log, 'ln': sp.log, 'exp': sp.exp,
+    'sqrt': sp.sqrt, 'abs': sp.Abs
+}
+
+def safe_sympify(expr: str):
+    """تحويل آمن للتعبير باستخدام sympify"""
+    try:
+        # ✅ تقييد الدوال المسموح بها
+        return sp.sympify(expr, locals=ALLOWED_FUNCTIONS, evaluate=True)
+    except:
+        raise ValueError(f"تعبير غير صالح: {expr}")
+
+# ========== دوال التنظيف ==========
+def clean_input(text: str) -> str:
     """تنظيف الإدخال من المشاكل"""
     text = text.replace("السؤال :", "").replace("السؤال:", "")
     text = text.replace("سؤال :", "").replace("سؤال:", "")
     text = text.strip()
     return text
 
-def clean_math_input(text):
-    """تحويل الرموز العربية إلى صيغة Python"""
+def clean_math_input(text: str) -> str:
+    """تحويل الرموز العربية إلى صيغة Python موحدة"""
     text = text.lower()
     text = text.replace("²", "**2")
     text = text.replace("³", "**3")
@@ -27,170 +50,275 @@ def clean_math_input(text):
     text = text.replace(" ", "")
     return text
 
+def normalize_question(text: str) -> str:
+    """تطبيع السؤال للحصول على مفتاح موحد للذاكرة"""
+    return clean_math_input(clean_input(text))
+
+# ========== استخراج المتغيرات ==========
+def extract_variable(expr) -> sp.Symbol:
+    """استخراج المتغير المستخدم في التعبير"""
+    variables = list(expr.free_symbols)
+    if variables:
+        return variables[0]  # أول متغير
+    return sp.symbols('x')  # افتراضي
+
+# ========== دوال LaTeX ==========
+def to_latex(expr) -> str:
+    """تحويل تعبير إلى LaTeX بأمان"""
+    try:
+        return sp.latex(expr)
+    except:
+        return str(expr)
+
+def is_math(text: str) -> bool:
+    """فحص إذا كان النص يحتوي على معادلة رياضية"""
+    return any(c in text for c in '+-*/^=()')
+
+# ========== ذاكرة التخزين المؤقت المحسنة ==========
+class Memory:
+    def __init__(self):
+        self.cache = {}
+        self.stats = {"hits": 0, "misses": 0}
+    
+    def _make_key(self, text: str) -> str:
+        """توليد مفتاح آمن من النص الطبيعي"""
+        return hashlib.md5(text.encode()).hexdigest()
+    
+    def get(self, text: str) -> Optional[Dict]:
+        key = self._make_key(text)
+        if key in self.cache:
+            self.stats["hits"] += 1
+            return self.cache[key]
+        self.stats["misses"] += 1
+        return None
+    
+    def set(self, text: str, value: Dict):
+        key = self._make_key(text)
+        self.cache[key] = value
+    
+    def get_stats(self):
+        return self.stats
+
+# ========== محرك الرياضيات الآمن والمحسن ==========
+class MathEngine:
+    def __init__(self):
+        self.x, self.y, self.z = sp.symbols('x y z')
+    
+    def calculator(self, expr: str) -> Tuple[str, List[tuple]]:
+        """آلة حاسبة آمنة"""
+        try:
+            result_expr = safe_sympify(expr)
+            result = result_expr.evalf()
+            result_latex = to_latex(result)
+            expr_latex = to_latex(result_expr)
+            
+            steps = [
+                ("🔢 عملية حسابية", ""),
+                ("التعبير:", expr_latex),
+                ("النتيجة:", result_latex),
+                ("✅ الإجابة النهائية:", f"\\boxed{{{result_latex}}}")
+            ]
+            return str(result), steps
+        except Exception as e:
+            return "خطأ", [(f"❌ {str(e)}", "")]
+    
+    def derivative(self, func: str) -> Tuple[str, List[tuple]]:
+        """حساب المشتقة مع اكتشاف المتغير تلقائياً"""
+        try:
+            expr = safe_sympify(func)
+            var = extract_variable(expr)
+            result = sp.diff(expr, var)
+            var_name = var.name
+            
+            steps = [
+                (f"📐 مشتقة بالنسبة لـ {var_name}", ""),
+                (f"f({var_name}) = {to_latex(expr)}", to_latex(expr)),
+                ("نطبق قواعد الاشتقاق:", ""),
+                (f"f'({var_name}) = {to_latex(result)}", to_latex(result)),
+                ("✅ الإجابة النهائية:", f"\\boxed{{{to_latex(result)}}}")
+            ]
+            return str(result), steps
+        except Exception as e:
+            return "خطأ", [(f"❌ {str(e)}", "")]
+    
+    def integral(self, func: str) -> Tuple[str, List[tuple]]:
+        """حساب التكامل مع اكتشاف المتغير تلقائياً"""
+        try:
+            expr = safe_sympify(func)
+            var = extract_variable(expr)
+            result = sp.integrate(expr, var)
+            var_name = var.name
+            
+            steps = [
+                (f"📊 تكامل بالنسبة لـ {var_name}", ""),
+                (f"∫ {to_latex(expr)} d{var_name}", f"∫ {to_latex(expr)} d{var_name}"),
+                ("نطبق قواعد التكامل:", ""),
+                (f"= {to_latex(result)} + C", f"{to_latex(result)} + C"),
+                ("✅ الإجابة النهائية:", f"\\boxed{{{to_latex(result)} + C}}")
+            ]
+            return str(result) + " + C", steps
+        except Exception as e:
+            return "خطأ", [(f"❌ {str(e)}", "")]
+    
+    def equation(self, eq: str) -> Tuple[str, List[tuple]]:
+        """حل المعادلة مع خطوات"""
+        try:
+            if "=" in eq:
+                left, right = eq.split("=")
+                left_expr = safe_sympify(left)
+                right_expr = safe_sympify(right)
+                expr = left_expr - right_expr
+            else:
+                left_expr = safe_sympify(eq)
+                right_expr = 0
+                expr = left_expr
+            
+            var = extract_variable(expr)
+            solutions = sp.solve(expr, var)
+            var_name = var.name
+            
+            sol_list = []
+            for sol in solutions:
+                if sol.is_real:
+                    sol_list.append(f"{var_name} = {to_latex(sol)}")
+                else:
+                    sol_list.append(f"{var_name} = {to_latex(sol)} (مركب)")
+            
+            sol_str = '  أو  '.join(sol_list) if sol_list else "لا يوجد حل حقيقي"
+            
+            steps = [
+                ("⚖️ معادلة", ""),
+                (f"{to_latex(left_expr)} = {to_latex(right_expr)}", f"{to_latex(left_expr)} = {to_latex(right_expr)}"),
+                ("ننقل الحدود:", ""),
+                (f"{to_latex(expr)} = 0", f"{to_latex(expr)} = 0"),
+                (f"الحلول:", ""),
+                (sol_str, sol_str),
+                ("✅ الإجابة النهائية:", f"\\boxed{{{sol_str}}}")
+            ]
+            return sol_str, steps
+        except Exception as e:
+            return "خطأ", [(f"❌ {str(e)}", "")]
+
+# ========== محرك AI مع Fallback ==========
 class AIEngine:
     def __init__(self):
+        self.math = MathEngine()
+        self.memory = Memory()
         self.ready = True
-        self.x, self.y, self.z = sp.symbols('x y z')
-        print("✅ AI Engine ready")
+        self.groq_key = GROQ_API_KEY
+        self.gemini_key = GEMINI_API_KEY
+        print("✅ AI Engine ready - الإصدار المحسن النهائي")
     
-    async def generate_code(self, question: str, domain: str = "general") -> dict:
-        # تنظيف الإدخال
-        question = clean_input(question)
-        question = clean_math_input(question)
-        
-        # ========== 1. آلة حاسبة ==========
-        if all(c in "0123456789+-*/()" for c in question):
-            try:
-                result = eval(question)
-                # ✅ تم إصلاح f-string هنا
-                code = f'''
-import sympy as sp
-result = {result}
-final_result = result
-steps = [{{"text": "{question} = {result}", "latex": "{question} = {result}"}}]
-'''
-                return {"success": True, "code": code, "model": "calculator"}
-            except:
-                return {"success": False, "error": "خطأ في العملية الحسابية"}
-        
-        # ========== 2. مشتقات ==========
-        if "مشتق" in question or "derivative" in question or "diff" in question:
-            return await self._handle_derivative(question)
-        
-        # ========== 3. تكاملات ==========
-        if "تكامل" in question or "integral" in question:
-            return await self._handle_integral(question)
-        
-        # ========== 4. معادلات ==========
-        if "حل" in question or "solve" in question or "=" in question:
-            return await self._handle_equation(question)
-        
-        return {"success": False, "error": "لم يتم التعرف على نوع المسألة"}
-    
-    async def _handle_derivative(self, question):
-        """حل المشتقات مع عرض جميل"""
-        # استخراج الدالة
-        func_match = re.search(r'([a-zA-Z0-9\*\-\+\/\(\)]+)', question)
-        if not func_match:
-            return {"success": False, "error": "لم نتمكن من استخراج الدالة"}
-        
-        func = func_match.group(1)
-        if 'x' not in func:
-            func = func + '*x' if func.isdigit() else func
+    async def ask_gemini(self, question: str) -> Dict[str, Any]:
+        """سؤال Gemini API"""
+        if not self.gemini_key:
+            return {"success": False, "error": "مفتاح Gemini غير موجود"}
         
         try:
-            x = sp.symbols('x')
-            expr = sp.sympify(func)
-            derivative = sp.diff(expr, x)
+            async with httpx.AsyncClient(timeout=30) as client:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.gemini_key}"
+                response = await client.post(
+                    url,
+                    headers={"Content-Type": "application/json"},
+                    json={
+                        "contents": [{
+                            "parts": [{"text": question}]
+                        }]
+                    }
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    if "candidates" in data:
+                        answer = data["candidates"][0]["content"]["parts"][0]["text"]
+                        steps = [
+                            ("🤖 إجابة Gemini", ""),
+                            (answer, answer if is_math(answer) else ""),
+                            ("", "")
+                        ]
+                        return {
+                            "success": True,
+                            "result": answer,
+                            "steps": steps,
+                            "model": "gemini",
+                            "from_cache": False
+                        }
+                return {"success": False, "error": f"Gemini error: {response.status_code}"}
+        except Exception as e:
+            return {"success": False, "error": f"Gemini error: {str(e)}"}
+    
+    async def generate_code(self, question: str, domain: str = "general") -> Dict[str, Any]:
+        # تطبيع السؤال للذاكرة
+        normalized = normalize_question(question)
+        
+        # 1. التحقق من الذاكرة (بالمفتاح الموحد)
+        cached = self.memory.get(normalized)
+        if cached:
+            cached["from_cache"] = True
+            return cached
+        
+        result = ""
+        steps = []
+        model = ""
+        
+        try:
+            # آلة حاسبة
+            if all(c in "0123456789+-*/()." for c in normalized.replace(" ", "")):
+                result, steps = self.math.calculator(normalized)
+                model = "calculator"
             
-            # ✅ تم إصلاح f-string هنا
-            code = f'''
-import sympy as sp
-x = sp.symbols('x')
-f = {func}
-final_result = sp.diff(f, x)
-
-# ========== عرض النتيجة ==========
-result_str = str(final_result).replace('**', '^')
-func_str = str(f).replace('**', '^')
-
-steps = [
-    {{"text": "**مشتقة:**", "latex": ""}},
-    {{"text": f"f(x) = {func_str}", "latex": f"f(x) = {func_str}"}},
-    {{"text": "نستخدم قاعدة القوى:", "latex": r"$\\frac{{d}}{{dx}} (x^n) = n x^{{n-1}}$"}},
-    {{"text": f"f'(x) = {result_str}", "latex": f"f'(x) = {result_str}"}},
-    {{"text": "✔️ **النتيجة النهائية:**", "latex": ""}},
-    {{"text": f"$\\boxed{{{result_str}}}$", "latex": f"$\\\\boxed{{{result_str}}}$"}}
-]
-'''
-            return {"success": True, "code": code, "model": "derivative"}
+            # مشتقات
+            elif "مشتق" in question or "derivative" in question or "diff" in question:
+                func_match = re.search(r'([a-zA-Z0-9\*\-\+\/\(\)\^]+)', normalized)
+                if func_match:
+                    result, steps = self.math.derivative(func_match.group(1))
+                    model = "derivative"
+                else:
+                    return {"success": False, "error": "لم نتمكن من استخراج الدالة"}
+            
+            # تكاملات
+            elif "تكامل" in question or "integral" in question:
+                func_match = re.search(r'([a-zA-Z0-9\*\-\+\/\(\)\^]+)', normalized)
+                if func_match:
+                    result, steps = self.math.integral(func_match.group(1))
+                    model = "integral"
+                else:
+                    return {"success": False, "error": "لم نتمكن من استخراج الدالة"}
+            
+            # معادلات
+            elif "حل" in question or "solve" in question or "=" in normalized:
+                result, steps = self.math.equation(normalized)
+                model = "equation"
+            
+            # AI Fallback
+            else:
+                ai_result = await self.ask_gemini(question)
+                if ai_result.get("success"):
+                    self.memory.set(normalized, ai_result)
+                    return ai_result
+                else:
+                    return {"success": False, "error": "لم يتم التعرف على نوع المسألة"}
+            
+            # تجهيز النتيجة
+            response = {
+                "success": True,
+                "result": result,
+                "steps": steps,
+                "model": model,
+                "from_cache": False
+            }
+            
+            # حفظ في الذاكرة (بالمفتاح الموحد)
+            self.memory.set(normalized, response)
+            return response
+            
         except Exception as e:
             return {"success": False, "error": f"خطأ في الحساب: {str(e)}"}
     
-    async def _handle_integral(self, question):
-        """حل التكاملات مع عرض جميل"""
-        func_match = re.search(r'([a-zA-Z0-9\*\-\+\/\(\)]+)', question)
-        if not func_match:
-            return {"success": False, "error": "لم نتمكن من استخراج الدالة"}
-        
-        func = func_match.group(1)
-        
-        try:
-            x = sp.symbols('x')
-            expr = sp.sympify(func)
-            integral = sp.integrate(expr, x)
-            
-            # ✅ تم إصلاح f-string هنا
-            func_str = str(expr).replace('**', '^')
-            integral_str = str(integral).replace('**', '^')
-            
-            code = f'''
-import sympy as sp
-x = sp.symbols('x')
-f = {func}
-final_result = sp.integrate(f, x)
-
-# ========== عرض النتيجة ==========
-func_str = "{func_str}"
-integral_str = str(final_result).replace('**', '^')
-
-steps = [
-    {{"text": "**تكامل:**", "latex": ""}},
-    {{"text": f"$\\int {func_str} \\, dx$", "latex": f"$\\\\int {func_str} \\\\, dx$"}},
-    {{"text": f"$\\int {func_str} \\, dx = {integral_str} + C$", "latex": f"$\\\\int {func_str} \\\\, dx = {integral_str} + C$"}},
-    {{"text": "✔️ **النتيجة النهائية:**", "latex": ""}},
-    {{"text": f"$\\boxed{{{integral_str} + C}}$", "latex": f"$\\\\boxed{{{integral_str} + C}}$"}}
-]
-'''
-            return {"success": True, "code": code, "model": "integral"}
-        except Exception as e:
-            return {"success": False, "error": f"خطأ في الحساب: {str(e)}"}
-    
-    async def _handle_equation(self, question):
-        """حل المعادلات مع عرض جميل"""
-        eq_match = re.search(r'([^=]+)=([^=]+)', question)
-        if not eq_match:
-            return {"success": False, "error": "صيغة المعادلة غير صحيحة"}
-        
-        left, right = eq_match.groups()
-        
-        try:
-            x = sp.symbols('x')
-            left_expr = sp.sympify(left)
-            right_expr = sp.sympify(right)
-            expr = left_expr - right_expr
-            solutions = sp.solve(expr, x)
-            
-            # ✅ تم إصلاح f-string هنا
-            left_str = str(left_expr).replace('**', '^')
-            right_str = str(right_expr).replace('**', '^')
-            solutions_str = ', '.join([f"x = {str(sol).replace('**', '^')}" for sol in solutions])
-            
-            code = f'''
-import sympy as sp
-x = sp.symbols('x')
-left = {left}
-right = {right}
-expr = left - right
-final_result = sp.solve(expr, x)
-
-# ========== عرض النتيجة ==========
-left_str = "{left_str}"
-right_str = "{right_str}"
-solutions_str = "{solutions_str}"
-
-steps = [
-    {{"text": "**معادلة:**", "latex": ""}},
-    {{"text": f"{left_str} = {right_str}", "latex": f"{left_str} = {right_str}"}},
-    {{"text": f"{left_str} - {right_str} = 0", "latex": f"{left_str} - {right_str} = 0"}},
-    {{"text": f"الحل: {solutions_str}", "latex": f"الحل: {solutions_str}"}},
-    {{"text": "✔️ **النتيجة النهائية:**", "latex": ""}},
-    {{"text": f"$\\boxed{{{solutions_str}}}$", "latex": f"$\\\\boxed{{{solutions_str}}}$"}}
-]
-'''
-            return {"success": True, "code": code, "model": "equation"}
-        except Exception as e:
-            return {"success": False, "error": f"خطأ في الحساب: {str(e)}"}
+    def get_stats(self):
+        return {
+            "memory": self.memory.get_stats()
+        }
     
     async def start(self):
         pass
