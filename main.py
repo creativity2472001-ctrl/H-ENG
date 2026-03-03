@@ -1,13 +1,18 @@
-# === ملف main.py مدمج وبسيط جداً للاختبار النهائي ===
-
+# main.py
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import uvicorn
 import time
+import os
 
-# --- 1. الخادم ---
-app = FastAPI()
+from ai_solver import AISolver
+from math_solver import MathSolver
+from config import HOST, PORT
+
+# ========== التهيئة ==========
+app = FastAPI(title="ذكي ماتك")
 
 app.add_middleware(
     CORSMiddleware,
@@ -16,191 +21,87 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- 2. الواجهة الأمامية (مدمجة هنا مباشرة) ---
-html_content = """
-<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ذكي ماتك - المساعد الهندسي</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-        body { background: white; min-height: 100vh; display: flex; flex-direction: column; }
-        .header { background: black; color: white; padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .logo h1 { font-size: 1.8em; font-weight: 600; }
-        .menu-container { position: relative; }
-        .menu-icon { font-size: 2em; cursor: pointer; background: rgba(255,255,255,0.2); width: 50px; height: 50px; display: flex; align-items: center; justify-content: center; border-radius: 50%; transition: background 0.3s; color: white; }
-        .menu-icon:hover { background: rgba(255,255,255,0.3); }
-        .dropdown-menu { position: absolute; top: 60px; left: 0; background: white; border-radius: 10px; box-shadow: 0 5px 20px rgba(0,0,0,0.2); width: 250px; display: none; z-index: 1000; overflow: hidden; border: 1px solid #eee; }
-        .dropdown-menu.show { display: block; }
-        .menu-item { padding: 15px 20px; cursor: pointer; transition: background 0.3s; color: #333; border-bottom: 1px solid #eee; }
-        .menu-item:last-child { border-bottom: none; }
-        .menu-item:hover { background: #f5f5f5; }
-        .menu-item.language { display: flex; justify-content: space-between; align-items: center; }
-        .language-options { display: none; background: #f9f9f9; padding: 10px 0; }
-        .language-options.show { display: block; }
-        .lang-option { padding: 10px 30px; cursor: pointer; transition: background 0.3s; }
-        .lang-option:hover { background: #e0e0e0; }
-        .lang-option.active { background: black; color: white; }
-        .main-content { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; text-align: center; background: white; }
-        .main-content h2 { font-size: 2.5em; color: #333; margin-bottom: 30px; }
-        .math-keyboard { width: 100%; max-width: 800px; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 60px; border: 1px solid #e0e0e0; }
-        .math-btn { background: black; color: white; border: none; width: 50px; height: 50px; border-radius: 50%; font-size: 1.3em; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
-        .math-btn:hover { transform: scale(1.1); box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
-        .math-btn.wide { width: auto; padding: 0 20px; border-radius: 30px; }
-        .search-container { width: 100%; max-width: 800px; background: white; border-radius: 60px; padding: 5px; box-shadow: 0 5px 20px rgba(0,0,0,0.1); display: flex; align-items: center; border: 2px solid black; margin-bottom: 20px; }
-        .search-input { flex: 1; border: none; outline: none; padding: 20px 30px; font-size: 1.2em; border-radius: 60px; background: transparent; }
-        .search-input::placeholder { color: #999; font-size: 1.1em; }
-        .search-btn { background: black; color: white; border: none; width: 60px; height: 60px; border-radius: 50%; margin-right: 10px; cursor: pointer; font-size: 1.5em; display: flex; align-items: center; justify-content: center; transition: transform 0.3s, box-shadow 0.3s; }
-        .search-btn:hover { transform: scale(1.05); box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
-        .result-area { width: 100%; max-width: 800px; margin-top: 30px; background: #f8f9fa; border-radius: 20px; padding: 30px; text-align: right; box-shadow: 0 5px 20px rgba(0,0,0,0.1); display: none; border: 1px solid #e0e0e0; }
-        .answer { font-size: 1.2em; line-height: 1.8; white-space: pre-wrap; color: #333; }
-        .answer strong { color: black; font-size: 1.1em; }
-        .answer .result-box { background: white; padding: 15px; border-radius: 10px; margin: 10px 0; border-right: 4px solid black; }
-        .answer .step-item { padding: 8px 15px; margin: 5px 0; background: white; border-radius: 8px; border-right: 3px solid black; }
-        .loading { text-align: center; padding: 30px; font-size: 1.2em; color: black; }
-        .loading-spinner { display: inline-block; width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid black; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 10px; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        .error { color: #dc3545; padding: 20px; background: #f8d7da; border-radius: 10px; font-size: 1.1em; text-align: center; }
-        .info-box { background: white; border-radius: 10px; padding: 20px; margin: 10px 0; }
-        .info-box h3 { color: black; margin-bottom: 15px; font-size: 1.3em; }
-        .info-box ul { padding-right: 20px; }
-        .info-box li { margin: 8px 0; color: #555; }
-        @media (max-width: 768px) {
-            .header { padding: 15px 20px; }
-            .logo h1 { font-size: 1.4em; }
-            .main-content h2 { font-size: 1.8em; }
-            .search-input { padding: 15px 20px; font-size: 1em; }
-            .search-btn { width: 50px; height: 50px; font-size: 1.2em; }
-            .math-keyboard { gap: 5px; }
-            .math-btn { width: 40px; height: 40px; font-size: 1.1em; }
-        }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <div class="logo"><h1>🔧 ذكي ماتك</h1></div>
-        <div class="menu-container">
-            <div class="menu-icon" onclick="toggleMenu()">☰</div>
-            <div class="dropdown-menu" id="dropdownMenu">
-                <div class="menu-item language" onclick="toggleLanguages(event)"><span>🌐 اللغة</span><span>▼</span></div>
-                <div class="language-options" id="languageOptions">
-                    <div class="lang-option active" onclick="changeLanguage('ar', event)">🇸🇦 العربية</div>
-                    <div class="lang-option" onclick="changeLanguage('en', event)">🇬🇧 English</div>
-                </div>
-                <div class="menu-item" onclick="showHelp()"><span>❓ المساعدة</span></div>
-                <div class="menu-item" onclick="showAbout()"><span>ℹ️ عن التطبيق</span></div>
-                <div class="menu-item" onclick="showExamples()"><span>📝 أمثلة</span></div>
-            </div>
-        </div>
-    </div>
-    <div class="main-content">
-        <h2 id="main-title">اسأل أي سؤال في الهندسة</h2>
-        <div class="math-keyboard">
-            <button class="math-btn" onclick="insertSymbol('x')">x</button>
-            <button class="math-btn" onclick="insertSymbol('^')">^</button>
-            <button class="math-btn" onclick="insertSymbol('√')">√</button>
-            <button class="math-btn" onclick="insertSymbol('∫')">∫</button>
-            <button class="math-btn" onclick="insertSymbol('sin(')">sin</button>
-            <button class="math-btn" onclick="insertSymbol('cos(')">cos</button>
-            <button class="math-btn wide" onclick="clearInput()">مسح</button>
-        </div>
-        <div class="search-container">
-            <input type="text" class="search-input" id="question" placeholder="مثال: مشتقة x^2, 2+2, تكامل sin x" onkeypress="handleKeyPress(event)">
-            <button class="search-btn" onclick="ask()">➡️</button>
-        </div>
-        <div id="result" class="result-area"></div>
-    </div>
-    <script>
-        let currentLanguage = 'ar';
-        const translations = {
-            ar: { title: 'ذكي ماتك - المساعد الهندسي', mainTitle: 'اسأل أي سؤال في الهندسة', placeholder: 'مثال: مشتقة x^2, 2+2, تكامل sin x, قانون أوم', help: '❓ المساعدة', about: 'ℹ️ عن التطبيق', examples: '📝 أمثلة', result: 'النتيجة', steps: 'خطوات الحل', error: 'حدث خطأ', connectionError: '❌ لا يمكن الاتصال بالخادم', using: 'باستخدام', time: 'الوقت', clear: 'مسح' },
-            en: { title: 'Zaky Matik - Engineering Assistant', mainTitle: 'Ask any engineering question', placeholder: 'Example: derivative of x^2, 2+2, integral of sin x, Ohm\\'s law', help: '❓ Help', about: 'ℹ️ About', examples: '📝 Examples', result: 'Result', steps: 'Steps', error: 'Error', connectionError: '❌ Cannot connect to server', using: 'Using', time: 'Time', clear: 'Clear' }
-        };
-        function updateUILanguage() { const t = translations[currentLanguage] || translations.ar; document.title = t.title; document.getElementById('main-title').textContent = t.mainTitle; document.getElementById('question').placeholder = t.placeholder; }
-        function insertSymbol(symbol) { const input = document.getElementById('question'); const start = input.selectionStart; const end = input.selectionEnd; input.value = input.value.substring(0, start) + symbol + input.value.substring(end); input.focus(); input.setSelectionRange(start + symbol.length, start + symbol.length); }
-        function clearInput() { document.getElementById('question').value = ''; document.getElementById('question').focus(); }
-        function handleKeyPress(event) { if (event.key === 'Enter') { ask(); } }
-        function toggleMenu() { document.getElementById('dropdownMenu').classList.toggle('show'); }
-        function toggleLanguages(event) { event.stopPropagation(); document.getElementById('languageOptions').classList.toggle('show'); }
-        function changeLanguage(lang, event) { currentLanguage = lang; document.querySelectorAll('.lang-option').forEach(opt => opt.classList.remove('active')); event.target.classList.add('active'); updateUILanguage(); document.getElementById('languageOptions').classList.remove('show'); document.getElementById('dropdownMenu').classList.remove('show'); }
-        function showHelp() { document.getElementById('dropdownMenu').classList.remove('show'); const t = translations[currentLanguage]; const resultDiv = document.getElementById('result'); resultDiv.style.display = 'block'; resultDiv.innerHTML = `<div class="info-box"><h3>❓ ${t.help}</h3><ul><li>• اكتب سؤالك أو استخدم الأزرار الرياضية</li><li>• اضغط Enter أو السهم الأسود للإرسال</li><li>• مثال: "مشتقة x^2"</li></ul></div>`; }
-        function showAbout() { document.getElementById('dropdownMenu').classList.remove('show'); const resultDiv = document.getElementById('result'); resultDiv.style.display = 'block'; resultDiv.innerHTML = `<div class="info-box"><h3>ℹ️ عن التطبيق</h3><p><strong>الإصدار:</strong> 1.0 (Test)</p><p><strong>المحرك:</strong> ذكي ماتك v3.2</p></div>`; }
-        function showExamples() { document.getElementById('dropdownMenu').classList.remove('show'); const resultDiv = document.getElementById('result'); resultDiv.style.display = 'block'; resultDiv.innerHTML = `<div class="info-box"><h3>📝 أمثلة للأسئلة</h3><div class="step-item">• مشتقة x^2</div><div class="step-item">• تكامل sin x</div><div class="step-item">• 2+2</div></div>`; }
-        async function ask() {
-            const question = document.getElementById('question').value.trim();
-            const resultDiv = document.getElementById('result');
-            const t = translations[currentLanguage];
-            if (!question) { alert('الرجاء كتابة سؤال'); return; }
-            resultDiv.style.display = 'block';
-            resultDiv.innerHTML = `<div class="loading"><div class="loading-spinner"></div><div>جاري المعالجة...</div></div>`;
-            try {
-                const response = await fetch('http://127.0.0.1:8000/solve', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ question: question, domain: 'general', include_steps: true, use_ai_assist: true })
-                });
-                const data = await response.json();
-                if (data.success) {
-                    let html = `<div class="answer"><div class="result-box"><strong>${t.result}:</strong> <LaTex>${data.result || 'تم بنجاح'}</div>`;
-                    if (data.steps && data.steps.length > 0) {
-                        html += `<br><strong>$</LaTex>{t.steps}:</strong><br>`;
-                        data.steps.forEach((step, index) => {
-                            html += `<div class="step-item"><LaTex>${index + 1}. $</LaTex>{step.text || ''}`;
-                            if (step.latex) { html += `<br><small><LaTex>${step.latex}</small>`; }
-                            html += `</div>`;
-                        });
-                    }
-                    if (data.model) { html += `<br><small>🔄 $</LaTex>{t.using}: <LaTex>${data.model}</small>`; }
-                    if (data.execution_time) { html += `<br><small>⏱️ $</LaTex>{t.time}: <LaTex>${data.execution_time.toFixed(2)} ثانية</small>`; }
-                    html += `</div>`;
-                    resultDiv.innerHTML = html;
-                } else {
-                    resultDiv.innerHTML = `<div class="error">❌ $</LaTex>{data.error || t.error}</div>`;
-                }
-            } catch (error) {
-                console.error("FETCH ERROR:", error);
-                resultDiv.innerHTML = `<div class="error">${t.connectionError}</div>`;
-            }
-        }
-        window.onclick = function(event) { if (!event.target.closest('.menu-container')) { document.getElementById('dropdownMenu').classList.remove('show'); document.getElementById('languageOptions').classList.remove('show'); } }
-        document.addEventListener('DOMContentLoaded', function() { updateUILanguage(); });
-    </script>
-</body>
-</html>
-"""
+os.makedirs("static", exist_ok=True)
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# --- 3. المسارات ---
+# ========== المحركات ==========
+ai_solver = AISolver()
+math_solver = MathSolver()
+
+# ========== المسارات ==========
 @app.get("/", response_class=HTMLResponse)
-async def get_root():
-    # هذه الدالة تعرض الواجهة الأمامية المدمجة أعلاه
-    return HTMLResponse(content=html_content)
+async def root():
+    try:
+        with open("static/index.html", "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read())
+    except:
+        return HTMLResponse(content="<h1>ذكي ماتك</h1>")
 
 @app.post("/solve")
-async def solve_for_test(request: Request):
-    # هذه الدالة ترد دائماً بإجابة ثابتة للاختبار
-    print(">>> TEST SERVER: Received a POST request! Sending back a success response.")
-    return {
-        "success": True,
-        "request_id": "test-id",
-        "timestamp": time.time(),
-        "execution_time": 0.1,
-        "result": "نجح الاختبار!",
-        "result_latex": "Success!",
-        "steps": [{"text": "الخادم والواجهة يعملان معاً بشكل صحيح", "latex": ""}],
-        "model": "test-mode",
-        "domain": "general",
-        "from_cache": False,
-        "status": "success"
-    }
+async def solve(request: Request):
+    """
+    نقطة نهاية واحدة لكل شيء
+    يقرر تلقائياً هل يستخدم AI أم لا
+    """
+    start = time.time()
+    data = await request.json()
+    question = data.get('question', '').strip()
+    
+    if not question:
+        return {
+            "success": False,
+            "error": "السؤال فارغ",
+            "time": time.time() - start
+        }
+    
+    # 1. محاولة حل المسائل البسيطة (آلة حاسبة)
+    if self._is_simple_math(question):
+        result = self._solve_simple(question)
+        result["time"] = time.time() - start
+        return result
+    
+    # 2. استخدام AI للمسائل المعقدة
+    ai_result = await ai_solver.solve(question)
+    ai_result["time"] = time.time() - start
+    return ai_result
 
-# --- 4. التشغيل ---
+def _is_simple_math(self, q: str) -> bool:
+    """هل هي مسألة حسابية بسيطة؟"""
+    q = q.replace(" ", "")
+    return all(c in "0123456789+-*/()" for c in q)
+
+def _solve_simple(self, q: str) -> dict:
+    """حل مسألة حسابية بسيطة"""
+    try:
+        # تقييم آمن
+        result = eval(q, {"__builtins__": {}})
+        return {
+            "success": True,
+            "result": str(result),
+            "steps": [{"text": f"{q} = {result}"}],
+            "model": "calculator"
+        }
+    except:
+        return {
+            "success": False,
+            "error": "تعبير غير صحيح"
+        }
+
+@app.get("/health")
+async def health():
+    return {"status": "healthy", "time": time.time()}
+
+# ========== التشغيل ==========
 if __name__ == "__main__":
-    print(">>> Starting FINAL, SELF-CONTAINED TEST server on http://127.0.0.1:8000")
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    print("\n" + "="*50)
+    print("🚀 ذكي ماتك - النسخة المبسطة")
+    print("="*50)
+    print(f"📍 http://{HOST}:{PORT}")
+    print("="*50 + "\n")
+    
+    uvicorn.run(
+        "main:app",
+        host=HOST,
+        port=PORT,
+        reload=True
+    )
