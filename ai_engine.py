@@ -1,4 +1,4 @@
-# ai_engine.py - الإصدار النهائي المحسن (مع كل الترقيات)
+# ai_engine.py - الإصدار المصحح والمتوافق مع math_engine.py
 import sympy as sp
 import re
 import httpx
@@ -12,7 +12,6 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
 # ========== SymPy الآمن ==========
-# قائمة الدوال المسموح بها فقط
 ALLOWED_FUNCTIONS = {
     'sin': sp.sin, 'cos': sp.cos, 'tan': sp.tan,
     'cot': sp.cot, 'csc': sp.csc, 'sec': sp.sec,
@@ -24,7 +23,6 @@ ALLOWED_FUNCTIONS = {
 def safe_sympify(expr: str):
     """تحويل آمن للتعبير باستخدام sympify"""
     try:
-        # ✅ تقييد الدوال المسموح بها
         return sp.sympify(expr, locals=ALLOWED_FUNCTIONS, evaluate=True)
     except:
         raise ValueError(f"تعبير غير صالح: {expr}")
@@ -59,8 +57,8 @@ def extract_variable(expr) -> sp.Symbol:
     """استخراج المتغير المستخدم في التعبير"""
     variables = list(expr.free_symbols)
     if variables:
-        return variables[0]  # أول متغير
-    return sp.symbols('x')  # افتراضي
+        return variables[0]
+    return sp.symbols('x')
 
 # ========== دوال LaTeX ==========
 def to_latex(expr) -> str:
@@ -74,14 +72,17 @@ def is_math(text: str) -> bool:
     """فحص إذا كان النص يحتوي على معادلة رياضية"""
     return any(c in text for c in '+-*/^=()')
 
-# ========== ذاكرة التخزين المؤقت المحسنة ==========
+def format_step(text: str, latex: str = "") -> Tuple[str, str]:
+    """تنسيق خطوة واحدة (نص + LaTeX)"""
+    return (text, latex)
+
+# ========== ذاكرة التخزين المؤقت ==========
 class Memory:
     def __init__(self):
         self.cache = {}
         self.stats = {"hits": 0, "misses": 0}
     
     def _make_key(self, text: str) -> str:
-        """توليد مفتاح آمن من النص الطبيعي"""
         return hashlib.md5(text.encode()).hexdigest()
     
     def get(self, text: str) -> Optional[Dict]:
@@ -99,8 +100,10 @@ class Memory:
     def get_stats(self):
         return self.stats
 
-# ========== محرك الرياضيات الآمن والمحسن ==========
-class MathEngine:
+# ========== ✅ التغيير 1: تغيير اسم الكلاس لتجنب التعارض ==========
+class SymbolicMath:
+    """محرك الرياضيات الرمزية (تم تغيير الاسم من MathEngine)"""
+    
     def __init__(self):
         self.x, self.y, self.z = sp.symbols('x y z')
     
@@ -114,8 +117,8 @@ class MathEngine:
             
             steps = [
                 ("🔢 عملية حسابية", ""),
-                ("التعبير:", expr_latex),
-                ("النتيجة:", result_latex),
+                (f"التعبير: {expr_latex}", expr_latex),
+                (f"النتيجة: {result_latex}", result_latex),
                 ("✅ الإجابة النهائية:", f"\\boxed{{{result_latex}}}")
             ]
             return str(result), steps
@@ -123,7 +126,7 @@ class MathEngine:
             return "خطأ", [(f"❌ {str(e)}", "")]
     
     def derivative(self, func: str) -> Tuple[str, List[tuple]]:
-        """حساب المشتقة مع اكتشاف المتغير تلقائياً"""
+        """حساب المشتقة"""
         try:
             expr = safe_sympify(func)
             var = extract_variable(expr)
@@ -142,7 +145,7 @@ class MathEngine:
             return "خطأ", [(f"❌ {str(e)}", "")]
     
     def integral(self, func: str) -> Tuple[str, List[tuple]]:
-        """حساب التكامل مع اكتشاف المتغير تلقائياً"""
+        """حساب التكامل"""
         try:
             expr = safe_sympify(func)
             var = extract_variable(expr)
@@ -161,7 +164,7 @@ class MathEngine:
             return "خطأ", [(f"❌ {str(e)}", "")]
     
     def equation(self, eq: str) -> Tuple[str, List[tuple]]:
-        """حل المعادلة مع خطوات"""
+        """حل المعادلة"""
         try:
             if "=" in eq:
                 left, right = eq.split("=")
@@ -191,7 +194,7 @@ class MathEngine:
                 (f"{to_latex(left_expr)} = {to_latex(right_expr)}", f"{to_latex(left_expr)} = {to_latex(right_expr)}"),
                 ("ننقل الحدود:", ""),
                 (f"{to_latex(expr)} = 0", f"{to_latex(expr)} = 0"),
-                (f"الحلول:", ""),
+                ("الحلول:", ""),
                 (sol_str, sol_str),
                 ("✅ الإجابة النهائية:", f"\\boxed{{{sol_str}}}")
             ]
@@ -199,15 +202,105 @@ class MathEngine:
         except Exception as e:
             return "خطأ", [(f"❌ {str(e)}", "")]
 
-# ========== محرك AI مع Fallback ==========
+# ========== ✅ التغيير 2: دوال مساعدة لتوليد الكود ==========
+def _generate_calculator_code(expr: str, result: float, steps: List[tuple]) -> str:
+    """توليد كود آلة حاسبة"""
+    steps_code = []
+    for step in steps:
+        desc, latex = step
+        steps_code.append(f'    format_step("{desc}", "{latex}")')
+    
+    return f'''
+# كود آلة حاسبة
+import sympy as sp
+
+def format_step(text: str, latex: str = "") -> tuple:
+    return (text, latex)
+
+expr = sp.sympify("{expr}")
+final_result = expr.evalf()
+steps = [
+{chr(10).join(steps_code)}
+]
+'''
+
+def _generate_derivative_code(func: str, result: str, steps: List[tuple]) -> str:
+    """توليد كود مشتقة"""
+    steps_code = []
+    for step in steps:
+        desc, latex = step
+        steps_code.append(f'    format_step("{desc}", "{latex}")')
+    
+    return f'''
+# كود مشتقة
+import sympy as sp
+
+def format_step(text: str, latex: str = "") -> tuple:
+    return (text, latex)
+
+x = sp.symbols('x')
+f = sp.sympify("{func}")
+final_result = sp.diff(f, x)
+steps = [
+{chr(10).join(steps_code)}
+]
+'''
+
+def _generate_integral_code(func: str, result: str, steps: List[tuple]) -> str:
+    """توليد كود تكامل"""
+    steps_code = []
+    for step in steps:
+        desc, latex = step
+        steps_code.append(f'    format_step("{desc}", "{latex}")')
+    
+    return f'''
+# كود تكامل
+import sympy as sp
+
+def format_step(text: str, latex: str = "") -> tuple:
+    return (text, latex)
+
+x = sp.symbols('x')
+f = sp.sympify("{func}")
+final_result = sp.integrate(f, x)
+steps = [
+{chr(10).join(steps_code)}
+]
+'''
+
+def _generate_equation_code(eq: str, result: str, steps: List[tuple]) -> str:
+    """توليد كود معادلة"""
+    steps_code = []
+    for step in steps:
+        desc, latex = step
+        steps_code.append(f'    format_step("{desc}", "{latex}")')
+    
+    return f'''
+# كود معادلة
+import sympy as sp
+
+def format_step(text: str, latex: str = "") -> tuple:
+    return (text, latex)
+
+x = sp.symbols('x')
+left, right = sp.sympify("{eq.split('=')[0]}"), sp.sympify("{eq.split('=')[1] if '=' in eq else '0'}")
+expr = left - right
+final_result = sp.solve(expr, x)
+steps = [
+{chr(10).join(steps_code)}
+]
+'''
+
+# ========== محرك AI ==========
 class AIEngine:
     def __init__(self):
-        self.math = MathEngine()
+        # ✅ التغيير 3: استخدام SymbolicMath بدلاً من MathEngine
+        self.math = SymbolicMath()
         self.memory = Memory()
         self.ready = True
         self.groq_key = GROQ_API_KEY
         self.gemini_key = GEMINI_API_KEY
-        print("✅ AI Engine ready - الإصدار المحسن النهائي")
+        print("✅ AI Engine ready - الإصدار المصحح")
     
     async def ask_gemini(self, question: str) -> Dict[str, Any]:
         """سؤال Gemini API"""
@@ -247,11 +340,32 @@ class AIEngine:
         except Exception as e:
             return {"success": False, "error": f"Gemini error: {str(e)}"}
     
+    # ✅ التغيير 4: دالة مساعدة لاستخراج التعبير الرياضي
+    def _extract_math_expression(self, text: str) -> Optional[str]:
+        """استخراج التعبير الرياضي من النص"""
+        # تنظيف النص أولاً
+        cleaned = clean_math_input(text)
+        
+        # أنماط البحث
+        patterns = [
+            r'm?\(([^)]+)\)',  # محتوى بين قوسين
+            r'([a-zA-Z0-9\*\-\+\/\(\)\^]+)',  # أي تعبير رياضي
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, cleaned)
+            if match:
+                return match.group(1)
+        return None
+    
+    # ✅ التغيير 5: تحسين generate_code لترجع كوداً حقيقياً
     async def generate_code(self, question: str, domain: str = "general") -> Dict[str, Any]:
+        """توليد كود SymPy متوافق مع MathEngine"""
+        
         # تطبيع السؤال للذاكرة
         normalized = normalize_question(question)
         
-        # 1. التحقق من الذاكرة (بالمفتاح الموحد)
+        # التحقق من الذاكرة
         cached = self.memory.get(normalized)
         if cached:
             cached["from_cache"] = True
@@ -260,55 +374,69 @@ class AIEngine:
         result = ""
         steps = []
         model = ""
+        code = ""
         
         try:
             # آلة حاسبة
             if all(c in "0123456789+-*/()." for c in normalized.replace(" ", "")):
                 result, steps = self.math.calculator(normalized)
+                code = _generate_calculator_code(normalized, float(result) if result != "خطأ" else 0, steps)
                 model = "calculator"
             
             # مشتقات
-            elif "مشتق" in question or "derivative" in question or "diff" in question:
-                func_match = re.search(r'([a-zA-Z0-9\*\-\+\/\(\)\^]+)', normalized)
-                if func_match:
-                    result, steps = self.math.derivative(func_match.group(1))
+            elif any(word in question for word in ["مشتق", "derivative", "diff"]):
+                expr = self._extract_math_expression(question)
+                if expr:
+                    result, steps = self.math.derivative(expr)
+                    code = _generate_derivative_code(expr, result, steps)
                     model = "derivative"
                 else:
                     return {"success": False, "error": "لم نتمكن من استخراج الدالة"}
             
             # تكاملات
-            elif "تكامل" in question or "integral" in question:
-                func_match = re.search(r'([a-zA-Z0-9\*\-\+\/\(\)\^]+)', normalized)
-                if func_match:
-                    result, steps = self.math.integral(func_match.group(1))
+            elif any(word in question for word in ["تكامل", "integral"]):
+                expr = self._extract_math_expression(question)
+                if expr:
+                    result, steps = self.math.integral(expr)
+                    code = _generate_integral_code(expr, result, steps)
                     model = "integral"
                 else:
                     return {"success": False, "error": "لم نتمكن من استخراج الدالة"}
             
             # معادلات
-            elif "حل" in question or "solve" in question or "=" in normalized:
+            elif any(word in question for word in ["حل", "solve"]) or "=" in normalized:
                 result, steps = self.math.equation(normalized)
+                code = _generate_equation_code(normalized, result, steps)
                 model = "equation"
             
             # AI Fallback
             else:
                 ai_result = await self.ask_gemini(question)
                 if ai_result.get("success"):
+                    # ✅ تحويل نتيجة Gemini إلى كود
+                    code = f'''
+# إجابة Gemini
+result = """{ai_result["result"]}"""
+steps = {ai_result["steps"]}
+final_result = result
+'''
+                    ai_result["code"] = code
                     self.memory.set(normalized, ai_result)
                     return ai_result
                 else:
                     return {"success": False, "error": "لم يتم التعرف على نوع المسألة"}
             
-            # تجهيز النتيجة
+            # ✅ التغيير 6: تجهيز النتيجة مع الكود
             response = {
                 "success": True,
                 "result": result,
                 "steps": steps,
+                "code": code,  # الآن يحتوي على كود حقيقي
                 "model": model,
                 "from_cache": False
             }
             
-            # حفظ في الذاكرة (بالمفتاح الموحد)
+            # حفظ في الذاكرة
             self.memory.set(normalized, response)
             return response
             
@@ -321,7 +449,9 @@ class AIEngine:
         }
     
     async def start(self):
+        """بدء تشغيل المحرك"""
         pass
     
     async def stop(self):
+        """إيقاف المحرك"""
         pass
