@@ -1,4 +1,4 @@
-# main.py - الإصدار النهائي الكامل مع جميع التحسينات (v1.0.0)
+# main.py - الإصدار النهائي الكامل مع جميع التحسينات والتكامل (v2.1.0)
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,7 +21,10 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
-# تحذيرات إذا كانت المفاتيح فارغة (تنبيه فقط، لا يمنع التشغيل)
+# قائمة المفاتيح الأساسية (التي بدونها لا يعمل التطبيق)
+CRITICAL_KEYS = []  # فارغة حالياً - لا يوجد مفاتيح أساسية
+
+# تحذيرات إذا كانت المفاتيح فارغة
 if not GROQ_API_KEY:
     print("⚠️ تحذير: GROQ_API_KEY غير موجودة - خدمة Groq غير متاحة")
 if not GEMINI_API_KEY:
@@ -32,10 +35,11 @@ if not OPENROUTER_API_KEY:
 # إعدادات إضافية
 MAX_CODE_LENGTH = 5000      # أقصى طول للكود المسموح به
 CACHE_TTL = 3600            # مدة التخزين المؤقت بالثواني (ساعة واحدة)
+REQUEST_TIMEOUT = 60        # مهلة الطلب بالثواني (زيادة من 30 إلى 60)
 
 # ========== إعدادات التطبيق ==========
 APP_NAME = "ذكي ماتك - مساعد المهندس"
-VERSION = "1.0.0"
+VERSION = "2.1.0"
 DEBUG = os.getenv("DEBUG", "True").lower() == "true"
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 HOST = os.getenv("HOST", "127.0.0.1")
@@ -96,12 +100,13 @@ async def lifespan(app: FastAPI):
     print(f"🚀 {APP_NAME} v{VERSION}")
     print("="*60)
     
-    # تمرير المفاتيح إلى AIEngine عند التهيئة
-    # سيتم استخدامها من متغيرات البيئة داخل ai_engine.py
-    
     # تهيئة المحركات
     app.state.ai_engine = AIEngine()
     app.state.math_engine = MathEngine()
+    
+    # ✅ ربط AI Engine مع Math Engine (ضروري للتكامل)
+    app.state.ai_engine.set_math_engine(app.state.math_engine)
+    
     app.state.start_time = time.time()
     app.state.warnings = []
     
@@ -142,6 +147,8 @@ async def lifespan(app: FastAPI):
     print(f"🔧 وضع التصحيح: {'مفعل' if DEBUG else 'معطل'}")
     print(f"📏 أقصى طول للكود: {MAX_CODE_LENGTH}")
     print(f"⏱️ مدة التخزين المؤقت: {CACHE_TTL} ثانية")
+    print(f"⏱️ مهلة الطلب: {REQUEST_TIMEOUT} ثانية")
+    print(f"🔗 المحركات مترابطة: ✅")
     
     if app.state.warnings:
         print("⚠️ تحذيرات:")
@@ -208,6 +215,10 @@ try:
     app.mount("/static", StaticFiles(directory="static"), name="static")
 except Exception as e:
     print(f"⚠️ تحذير: فشل تحميل المجلد الثابت: {e}")
+    # إنشاء صفحة HTML افتراضية في الذاكرة
+    @app.get("/static/{path:path}")
+    async def fallback_static(path: str):
+        return HTMLResponse(content=f"<h1>ملف {path} غير موجود</h1><p>تم إنشاء المجلد static لكن الملف المطلوب غير موجود.</p>")
 
 # ========== الصفحة الرئيسية المحسنة ==========
 @app.get("/", response_class=HTMLResponse)
@@ -260,11 +271,11 @@ async def root():
             
             <div class="examples">
                 <strong>📝 أمثلة جاهزة:</strong>
-                <button class="example-btn" onclick="setExample('مشتقة x**2 + 2x')">مشتقة</button>
-                <button class="example-btn" onclick="setExample('تكامل sin(x)')">تكامل</button>
-                <button class="example-btn" onclick="setExample('حل x**2 - 4 = 0')">معادلة</button>
-                <button class="example-btn" onclick="setExample('5 + 3 * 2')">آلة حاسبة</button>
-                <button class="example-btn" onclick="setExample('مشتقة sin(x) * cos(x)')">مشتقة مركبة</button>
+                <button class="example-btn" onclick="setExample('2+2')">➕ آلة حاسبة</button>
+                <button class="example-btn" onclick="setExample('x+5=10')">⚖️ معادلة</button>
+                <button class="example-btn" onclick="setExample('مشتقة x^2')">📈 مشتقة</button>
+                <button class="example-btn" onclick="setExample('تكامل sin(x)')">∫ تكامل</button>
+                <button class="example-btn" onclick="setExample('[[1,2],[3,4]] * [[5,6],[7,8]]')">📊 مصفوفات</button>
             </div>
             
             <textarea id="question" rows="4" placeholder="اكتب سؤالك الرياضي هنا..."></textarea>
@@ -348,6 +359,35 @@ async def root():
     </html>
     """)
 
+# ========== دالة مساعدة للتحقق من صحة نتيجة AI ==========
+def validate_ai_result(ai_result: Any) -> tuple:
+    """التحقق من صحة نتيجة AI وإرجاع (صحيح, النتيجة, خطأ)"""
+    if not ai_result:
+        return False, None, "نتيجة فارغة من AI Engine"
+    
+    if not isinstance(ai_result, dict):
+        return False, None, f"نتيجة غير صالحة: نوع {type(ai_result)}"
+    
+    success = ai_result.get("success", False)
+    if not success:
+        error = ai_result.get("error", "خطأ غير معروف في AI Engine")
+        return False, None, error
+    
+    # التأكد من وجود الحقول الأساسية
+    result = ai_result.get("result")
+    steps = ai_result.get("steps", [])
+    model = ai_result.get("model", "unknown")
+    from_cache = ai_result.get("from_cache", False)
+    
+    return True, {
+        "result": result,
+        "steps": steps,
+        "model": model,
+        "from_cache": from_cache,
+        "ai_error": None,
+        "math_error": ai_result.get("math_error")  # تمرير خطأ رياضي إذا وجد
+    }, None
+
 # ========== نقطة نهاية حل المسائل المحسنة ==========
 @app.post("/solve", response_model=SolveResponse)
 async def solve(request: SolveRequest):
@@ -380,10 +420,10 @@ async def solve(request: SolveRequest):
         try:
             ai_result = await asyncio.wait_for(
                 app.state.ai_engine.generate_code(question),
-                timeout=30.0
+                timeout=REQUEST_TIMEOUT
             )
         except asyncio.TimeoutError:
-            ai_error = "انتهت مهلة توليد الكود (30 ثانية)"
+            ai_error = f"انتهت مهلة توليد الكود ({REQUEST_TIMEOUT} ثانية)"
             return SolveResponse(
                 success=False,
                 error="فشل في توليد الكود",
@@ -401,74 +441,29 @@ async def solve(request: SolveRequest):
                 warnings=warnings
             )
         
-        if not ai_result or not isinstance(ai_result, dict):
-            ai_error = "نتيجة غير صالحة من AI Engine"
+        # التحقق من صحة النتيجة
+        is_valid, validated_result, error = validate_ai_result(ai_result)
+        if not is_valid:
+            ai_error = error
             return SolveResponse(
                 success=False,
-                error=ai_error,
+                error=error,
                 ai_error=ai_error,
                 time=round(time.time() - start_time, 4),
                 warnings=warnings
             )
         
-        if not ai_result.get("success"):
-            ai_error = ai_result.get("error", "فشل في توليد الكود")
-            return SolveResponse(
-                success=False,
-                error=ai_error,
-                ai_error=ai_error,
-                time=round(time.time() - start_time, 4),
-                warnings=warnings
-            )
+        # استخراج البيانات المحققة
+        result = validated_result["result"]
+        steps_data = validated_result["steps"]
+        model = validated_result["model"]
+        from_cache = validated_result["from_cache"]
+        math_error = validated_result.get("math_error")
         
-        # التحقق من وجود الكود
-        code = ai_result.get("code")
-        if not code:
-            warnings.append("تم توليد الكود بنجاح ولكن لا يوجد مخرجات")
-        
-        # 2. Math Engine ينفذ الكود
-        math_result = None
-        try:
-            math_result = await asyncio.wait_for(
-                app.state.math_engine.execute(code if code else ""),
-                timeout=30.0
-            )
-        except asyncio.TimeoutError:
-            math_error = "انتهت مهلة تنفيذ الكود (30 ثانية)"
-            return SolveResponse(
-                success=False,
-                error="فشل في تنفيذ الكود",
-                ai_error=ai_error,
-                math_error=math_error,
-                time=round(time.time() - start_time, 4),
-                warnings=warnings
-            )
-        except Exception as e:
-            math_error = str(e)
-            return SolveResponse(
-                success=False,
-                error="فشل في تنفيذ الكود",
-                ai_error=ai_error,
-                math_error=math_error,
-                time=round(time.time() - start_time, 4),
-                warnings=warnings
-            )
-        
-        if not math_result:
-            math_error = "نتيجة غير صالحة من Math Engine"
-            return SolveResponse(
-                success=False,
-                error=math_error,
-                ai_error=ai_error,
-                math_error=math_error,
-                time=round(time.time() - start_time, 4),
-                warnings=warnings
-            )
-        
-        # تحويل الخطوات
+        # تحويل الخطوات إذا وجدت
         steps = []
-        if math_result and hasattr(math_result, 'steps') and math_result.steps:
-            for step in math_result.steps:
+        if steps_data:
+            for step in steps_data:
                 try:
                     steps.append(StepResponse.from_step(step))
                 except Exception as e:
@@ -478,13 +473,13 @@ async def solve(request: SolveRequest):
         total_time = round(time.time() - start_time, 4)
         
         return SolveResponse(
-            success=math_result.success if math_result else False,
-            result=math_result.result_str if math_result and math_result.success else None,
+            success=True,
+            result=str(result) if result is not None else None,
             steps=steps,
-            model=ai_result.get("model", "ai"),
-            from_cache=ai_result.get("from_cache", False),
+            model=model,
+            from_cache=from_cache,
             time=total_time,
-            error=math_result.error if math_result and not math_result.success else None,
+            error=None,
             warnings=warnings,
             ai_error=ai_error,
             math_error=math_error
@@ -509,12 +504,13 @@ async def solve(request: SolveRequest):
 # ========== نقطة نهاية فحص الصحة المحسنة ==========
 @app.get("/health")
 async def health():
-    """فحص صحة الخادم والمحركات"""
+    """فحص صحة الخادم والمحركات مع اختبار فعلي"""
     uptime = time.time() - (app.state.start_time if hasattr(app.state, 'start_time') else START_TIME)
     
     # فحص حالة المحركات
     ai_status = "ready"
     math_status = "ready"
+    math_test_result = "untested"
     
     try:
         if hasattr(app.state.ai_engine, 'ready'):
@@ -525,8 +521,21 @@ async def health():
     try:
         if hasattr(app.state.math_engine, 'get_stats'):
             math_status = "ready"
+            
+            # ✅ اختبار فعلي لمحرك الرياضيات
+            try:
+                test_result = await app.state.math_engine.calculate("1+1")
+                if test_result and test_result.success:
+                    math_test_result = f"passed (1+1={test_result.result_str})"
+                else:
+                    math_test_result = f"failed: {test_result.error if test_result else 'unknown'}"
+            except Exception as e:
+                math_test_result = f"error: {str(e)}"
     except:
         math_status = "unknown"
+    
+    # التحقق من الربط
+    connection_status = "connected" if hasattr(app.state.ai_engine, 'math_engine') and app.state.ai_engine.math_engine else "disconnected"
     
     return JSONResponse({
         "status": "healthy",
@@ -534,13 +543,16 @@ async def health():
         "debug": DEBUG,
         "ai_engine": ai_status,
         "math_engine": math_status,
+        "math_test": math_test_result,
+        "connection": connection_status,
         "uptime": round(uptime, 2),
         "uptime_str": f"{int(uptime // 3600):02d}:{int((uptime % 3600) // 60):02d}:{int(uptime % 60):02d}",
         "timestamp": time.time(),
         "warnings": getattr(app.state, 'warnings', []),
         "config": {
             "max_code_length": MAX_CODE_LENGTH,
-            "cache_ttl": CACHE_TTL
+            "cache_ttl": CACHE_TTL,
+            "request_timeout": REQUEST_TIMEOUT
         }
     })
 
@@ -555,7 +567,8 @@ async def get_stats():
             "warnings": getattr(app.state, 'warnings', []),
             "config": {
                 "max_code_length": MAX_CODE_LENGTH,
-                "cache_ttl": CACHE_TTL
+                "cache_ttl": CACHE_TTL,
+                "request_timeout": REQUEST_TIMEOUT
             }
         }
     }
@@ -617,7 +630,7 @@ async def test():
                 <h3>📌 النقاط المتاحة:</h3>
                 <div class="endpoint"><code>GET  /</code> - الصفحة الرئيسية</div>
                 <div class="endpoint"><code>POST /solve</code> - حل المسائل</div>
-                <div class="endpoint"><code>GET  /health</code> - فحص الصحة</div>
+                <div class="endpoint"><code>GET  /health</code> - فحص الصحة (مع اختبار الرياضيات)</div>
                 <div class="endpoint"><code>GET  /stats</code> - الإحصائيات</div>
                 <div class="endpoint"><code>GET  /test</code> - هذه الصفحة</div>
             </div>
@@ -679,6 +692,7 @@ if __name__ == "__main__":
     print(f"🌐 النطاقات المسموحة: {ALLOWED_ORIGINS}")
     print(f"📏 أقصى طول للكود: {MAX_CODE_LENGTH}")
     print(f"⏱️ مدة التخزين المؤقت: {CACHE_TTL} ثانية")
+    print(f"⏱️ مهلة الطلب: {REQUEST_TIMEOUT} ثانية")
     print("="*60 + "\n")
     
     uvicorn.run(
