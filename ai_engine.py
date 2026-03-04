@@ -1,4 +1,4 @@
-# ai_engine.py - الإصدار النهائي الكامل مع جميع التحسينات
+# ai_engine.py - الإصدار النهائي الكامل مع جميع التحسينات (تم تعديل دالة استخراج التعبيرات)
 import sympy as sp
 import re
 import httpx
@@ -378,8 +378,9 @@ class AIEngine:
         allowed_chars = "0123456789+-*/()."
         return all(c in allowed_chars for c in cleaned)
     
+    # ========== ✅ تم تعديل هذه الدالة فقط ==========
     def _extract_math_expression(self, text: str) -> Optional[str]:
-        """استخراج التعبير الرياضي من النص بشكل دقيق"""
+        """استخراج التعبير الرياضي من النص بشكل دقيق (نسخة محسنة)"""
         # تنظيف النص أولاً
         cleaned = clean_math_input(text)
         
@@ -387,7 +388,10 @@ class AIEngine:
         for word in ["مشتقة", "مشتق", "derivative", "diff", "تكامل", "integral", "حل", "solve"]:
             cleaned = cleaned.replace(word, "").strip()
         
-        # قائمة الأنماط المتقدمة
+        # حفظ نسخة من النص الأصلي للأنماط التي تحتاج ^
+        original_with_caret = text.replace("^", "^")  # نحتفظ بـ ^
+        
+        # قائمة الأنماط المتقدمة (محسنة)
         patterns = [
             # نمط f(x) = ...
             r'f\([xyz]\)\s*=\s*([^,\n]+)',
@@ -397,6 +401,10 @@ class AIEngine:
             
             # نمط أي تعبير رياضي مع دوال
             r'([a-zA-Z0-9\*\-\+\/\(\)\^]+(?:sin|cos|tan|log|exp|sqrt)[a-zA-Z0-9\*\-\+\/\(\)\^]*)',
+            
+            # ✅ أنماط جديدة للأسس (مهمة للمشتقات والتكاملات)
+            r'([a-zA-Z0-9]+\^[0-9]+(?:\s*[\+\-\*\/]\s*[a-zA-Z0-9\^]+)*)',  # نمط للأسس (مثل x^5 + 2x^3)
+            r'([a-zA-Z0-9]+\*\*[0-9]+(?:\s*[\+\-\*\/]\s*[a-zA-Z0-9\*]+)*)',  # نمط لمتغير بقوة (مثل x**5)
             
             # نمط معادلة مع علامة =
             r'([^=\s]+=[^=\s]+)',
@@ -408,11 +416,23 @@ class AIEngine:
             r'([a-zA-Z0-9\*\-\+\/\(\)\^]+)',
         ]
         
+        # تجربة الأنماط على النص المنظف
         for pattern in patterns:
             match = re.search(pattern, cleaned, re.IGNORECASE)
             if match:
                 expr = match.group(1).strip()
                 if expr and len(expr) > 0:
+                    # تأكد من تحويل ^ إلى **
+                    expr = expr.replace("^", "**")
+                    return expr
+        
+        # إذا فشلت المحاولة الأولى، جرب على النص الأصلي
+        for pattern in patterns:
+            match = re.search(pattern, original_with_caret, re.IGNORECASE)
+            if match:
+                expr = match.group(1).strip()
+                if expr and len(expr) > 0:
+                    expr = expr.replace("^", "**")
                     return expr
         
         return None
