@@ -1,9 +1,10 @@
-# ai_engine.py - الإصدار النهائي الكامل مع جميع التحسينات (تم تعديل دالة استخراج التعبيرات)
+# ai_engine.py - الإصدار النهائي مع الذاكرة الذكية والتحسينات (v3.1)
 import sympy as sp
 import re
 import httpx
 import os
 import hashlib
+import json
 from typing import Dict, Any, Optional, Tuple, List
 
 # ========== المفاتيح ==========
@@ -66,7 +67,6 @@ def extract_variables_from_expr(expr_str: str) -> List[str]:
         expr = safe_sympify(expr_str)
         return [str(var) for var in expr.free_symbols]
     except:
-        # إذا فشل التحويل، ابحث عن المتغيرات بالنمط
         return re.findall(r'[xyz]', expr_str)
 
 # ========== دوال LaTeX ==========
@@ -80,9 +80,9 @@ def to_latex(expr) -> str:
 def is_math(text: str) -> bool:
     """فحص إذا كان النص يحتوي على معادلة رياضية"""
     math_patterns = [
-        r'[\d\+\-\*/\^\(\)]',  # رموز رياضية
-        r'(sin|cos|tan|cot|sec|csc|log|ln|exp|sqrt)',  # دوال رياضية
-        r'[xyz]',  # متغيرات
+        r'[\d\+\-\*/\^\(\)]',
+        r'(sin|cos|tan|cot|sec|csc|log|ln|exp|sqrt)',
+        r'[xyz]',
     ]
     text_lower = text.lower()
     for pattern in math_patterns:
@@ -94,26 +94,281 @@ def format_step(text: str, latex: str = "") -> Tuple[str, str]:
     """تنسيق خطوة واحدة (نص + LaTeX)"""
     return (text, latex)
 
-# ========== ذاكرة التخزين المؤقت ==========
-class Memory:
+# ========== الذاكرة الذكية المحسنة ==========
+class SmartMemory:
+    """ذاكرة ذكية تتعرف على الأنماط وليس النصوص فقط"""
+    
     def __init__(self):
-        self.cache = {}
-        self.stats = {"hits": 0, "misses": 0}
+        self.cache = {}  # للتخزين السريع
+        self.patterns = {}  # للأنماط الذكية
+        self.stats = {"hits": 0, "misses": 0, "pattern_matches": 0}
     
     def _make_key(self, text: str) -> str:
+        """توليد مفتاح عادي"""
         return hashlib.md5(text.encode()).hexdigest()
     
-    def get(self, text: str) -> Optional[Dict]:
-        key = self._make_key(text)
+    def _extract_numbers(self, text: str) -> List[str]:
+        """استخراج الأرقام من النص"""
+        return re.findall(r'\d+', text)
+    
+    def _extract_pattern(self, question: str, solution: Dict) -> Optional[Dict]:
+        """استخراج نمط من السؤال والحل"""
+        try:
+            normalized = normalize_question(question)
+            model = solution.get("model", "")
+            
+            # أنماط المشتقات
+            if "derivative" in model or "مشتق" in question:
+                # مشتقات القوى (x^n)
+                power_match = re.search(r'x\*\*(\d+)', normalized)
+                if power_match:
+                    power = power_match.group(1)
+                    return {
+                        "type": "derivative_power",
+                        "pattern": "x**n",
+                        "params": {"n": power},
+                        "solution_template": solution,
+                        "func": "power"
+                    }
+                
+                # مشتقات الدوال المثلثية (sin(ax))
+                trig_match = re.search(r'(sin|cos|tan)\((\d*)([a-z])\)', normalized)
+                if trig_match:
+                    func, coeff, var = trig_match.groups()
+                    coeff = coeff if coeff else "1"
+                    return {
+                        "type": "derivative_trig",
+                        "pattern": f"{func}({coeff}*{var})",
+                        "params": {"func": func, "coeff": coeff, "var": var},
+                        "solution_template": solution
+                    }
+            
+            # أنماط التكاملات
+            elif "integral" in model or "تكامل" in question:
+                # تكاملات القوى (x^n)
+                power_match = re.search(r'x\*\*(\d+)', normalized)
+                if power_match:
+                    power = power_match.group(1)
+                    return {
+                        "type": "integral_power",
+                        "pattern": "x**n",
+                        "params": {"n": power},
+                        "solution_template": solution
+                    }
+                
+                # تكاملات الدوال المثلثية
+                trig_match = re.search(r'(sin|cos|tan)\((\d*)([a-z])\)', normalized)
+                if trig_match:
+                    func, coeff, var = trig_match.groups()
+                    coeff = coeff if coeff else "1"
+                    return {
+                        "type": "integral_trig",
+                        "pattern": f"{func}({coeff}*{var})",
+                        "params": {"func": func, "coeff": coeff, "var": var},
+                        "solution_template": solution
+                    }
+            
+            # أنماط المعادلات
+            elif "equation" in model or "=" in normalized:
+                match = re.search(r'([^=]+)=([^=]+)', normalized)
+                if match:
+                    left, right = match.groups()
+                    # استخراج الأرقام من المعادلة
+                    left_nums = self._extract_numbers(left)
+                    right_nums = self._extract_numbers(right)
+                    
+                    return {
+                        "type": "equation",
+                        "pattern": f"{left}={right}",
+                        "params": {
+                            "left": left,
+                            "right": right,
+                            "left_numbers": left_nums,
+                            "right_numbers": right_nums
+                        },
+                        "solution_template": solution
+                    }
+            
+            return None
+        except Exception as e:
+            print(f"⚠️ خطأ في استخراج النمط: {e}")
+            return None
+    
+    def _apply_power_rule(self, old_power: str, new_power: str, steps: List) -> Tuple[str, List]:
+        """تطبيق قاعدة القوة على المشتقات/التكاملات"""
+        try:
+            old_power_int = int(old_power)
+            new_power_int = int(new_power)
+            
+            # حساب النتيجة الجديدة
+            if "derivative" in str(steps):
+                new_result = f"{new_power_int}*x**{new_power_int-1}"
+            else:  # integral
+                new_result = f"x**{new_power_int+1}/{new_power_int+1}"
+            
+            # تحديث الخطوات
+            new_steps = []
+            for step in steps:
+                if isinstance(step, tuple):
+                    desc, latex = step
+                    # استبدال الأرقام في النصوص
+                    desc = desc.replace(f"^{old_power}", f"^{new_power}")
+                    desc = desc.replace(f"**{old_power}", f"**{new_power}")
+                    desc = desc.replace(f"/{old_power}", f"/{new_power}")
+                    
+                    latex = latex.replace(f"^{old_power}", f"^{new_power}")
+                    latex = latex.replace(f"{{{old_power}}}", f"{{{new_power}}}")
+                    
+                    new_steps.append((desc, latex))
+                else:
+                    new_steps.append(step)
+            
+            return new_result, new_steps
+        except:
+            return None, None
+    
+    def _apply_trig_rule(self, old_coeff: str, new_coeff: str, func: str, steps: List) -> Tuple[str, List]:
+        """تطبيق قاعدة الدوال المثلثية"""
+        try:
+            new_steps = []
+            for step in steps:
+                if isinstance(step, tuple):
+                    desc, latex = step
+                    # استبدال المعامل
+                    desc = desc.replace(f"{old_coeff}", f"{new_coeff}")
+                    latex = latex.replace(f"{old_coeff}", f"{new_coeff}")
+                    new_steps.append((desc, latex))
+                else:
+                    new_steps.append(step)
+            
+            # النتيجة تعتمد على نوع الدالة
+            if func == "sin":
+                new_result = f"{new_coeff}*cos({new_coeff}*x)"
+            elif func == "cos":
+                new_result = f"-{new_coeff}*sin({new_coeff}*x)"
+            else:
+                new_result = None
+            
+            return new_result, new_steps
+        except:
+            return None, None
+    
+    def _apply_pattern(self, pattern: Dict, question: str) -> Optional[Dict]:
+        """تطبيق نمط على سؤال جديد"""
+        try:
+            normalized = normalize_question(question)
+            pattern_type = pattern.get("type")
+            
+            if pattern_type == "derivative_power":
+                # استخراج القوة الجديدة
+                match = re.search(r'x\*\*(\d+)', normalized)
+                if match:
+                    new_power = match.group(1)
+                    old_power = pattern["params"]["n"]
+                    
+                    if new_power != old_power:
+                        new_result, new_steps = self._apply_power_rule(
+                            old_power, new_power, 
+                            pattern["solution_template"]["steps"]
+                        )
+                        
+                        if new_result:
+                            return {
+                                "success": True,
+                                "result": new_result,
+                                "steps": new_steps,
+                                "model": "pattern_match_derivative",
+                                "from_cache": True
+                            }
+            
+            elif pattern_type == "derivative_trig":
+                # استخراج المعامل الجديد
+                match = re.search(r'(sin|cos|tan)\((\d*)([a-z])\)', normalized)
+                if match:
+                    func, new_coeff, var = match.groups()
+                    new_coeff = new_coeff if new_coeff else "1"
+                    old_coeff = pattern["params"]["coeff"]
+                    
+                    if new_coeff != old_coeff and func == pattern["params"]["func"]:
+                        new_result, new_steps = self._apply_trig_rule(
+                            old_coeff, new_coeff, func,
+                            pattern["solution_template"]["steps"]
+                        )
+                        
+                        if new_result:
+                            return {
+                                "success": True,
+                                "result": new_result,
+                                "steps": new_steps,
+                                "model": "pattern_match_trig",
+                                "from_cache": True
+                            }
+            
+            elif pattern_type == "integral_power":
+                # مشابه للمشتقات لكن للتكامل
+                match = re.search(r'x\*\*(\d+)', normalized)
+                if match:
+                    new_power = match.group(1)
+                    old_power = pattern["params"]["n"]
+                    
+                    if new_power != old_power:
+                        new_result, new_steps = self._apply_power_rule(
+                            old_power, new_power,
+                            pattern["solution_template"]["steps"]
+                        )
+                        
+                        if new_result:
+                            return {
+                                "success": True,
+                                "result": new_result + " + C",
+                                "steps": new_steps,
+                                "model": "pattern_match_integral",
+                                "from_cache": True
+                            }
+            
+            return None
+        except Exception as e:
+            print(f"⚠️ خطأ في تطبيق النمط: {e}")
+            return None
+    
+    def get(self, question: str) -> Optional[Dict]:
+        """البحث في الذاكرة (نص عادي أو نمط)"""
+        normalized = normalize_question(question)
+        key = self._make_key(normalized)
+        
+        # 1️⃣ البحث المباشر
         if key in self.cache:
             self.stats["hits"] += 1
+            print(f"✅ تم العثور على التطابق التام في الذاكرة")
             return self.cache[key]
+        
+        # 2️⃣ البحث بالأنماط
+        for pattern_key, pattern in self.patterns.items():
+            matched = self._apply_pattern(pattern, question)
+            if matched:
+                self.stats["pattern_matches"] += 1
+                print(f"✅ تم العثور على نمط مطابق: {pattern_key}")
+                return matched
+        
         self.stats["misses"] += 1
+        print(f"❌ لم يتم العثور على السؤال في الذاكرة")
         return None
     
-    def set(self, text: str, value: Dict):
-        key = self._make_key(text)
+    def set(self, question: str, value: Dict):
+        """حفظ في الذاكرة"""
+        normalized = normalize_question(question)
+        key = self._make_key(normalized)
+        
+        # حفظ النص الأصلي
         self.cache[key] = value
+        print(f"💾 تم حفظ السؤال في الذاكرة المباشرة")
+        
+        # استخراج وحفظ النمط
+        pattern = self._extract_pattern(question, value)
+        if pattern:
+            pattern_key = f"{pattern['type']}_{json.dumps(pattern['params'])}"
+            self.patterns[pattern_key] = pattern
+            print(f"🧠 تم حفظ النمط الذكي: {pattern['type']}")
     
     def get_stats(self):
         return self.stats
@@ -144,7 +399,7 @@ class SymbolicMath:
             return "خطأ", [(f"❌ {str(e)}", "")]
     
     def derivative(self, func: str) -> Tuple[str, List[tuple]]:
-        """حساب المشتقة مع اكتشاف المتغيرات"""
+        """حساب المشتقة"""
         try:
             expr = safe_sympify(func)
             var = extract_variable(expr)
@@ -163,7 +418,7 @@ class SymbolicMath:
             return "خطأ", [(f"❌ {str(e)}", "")]
     
     def integral(self, func: str) -> Tuple[str, List[tuple]]:
-        """حساب التكامل مع اكتشاف المتغيرات"""
+        """حساب التكامل"""
         try:
             expr = safe_sympify(func)
             var = extract_variable(expr)
@@ -182,7 +437,7 @@ class SymbolicMath:
             return "خطأ", [(f"❌ {str(e)}", "")]
     
     def equation(self, eq: str) -> Tuple[str, List[tuple]]:
-        """حل المعادلة مع اكتشاف المتغيرات"""
+        """حل المعادلة"""
         try:
             if "=" in eq:
                 left, right = eq.split("=")
@@ -220,222 +475,23 @@ class SymbolicMath:
         except Exception as e:
             return "خطأ", [(f"❌ {str(e)}", "")]
 
-# ========== دوال توليد الكود المحسنة ==========
-class CodeGenerator:
-    """توليد كود SymPy بشكل آمن"""
-    
-    @staticmethod
-    def _escape_string(text: str) -> str:
-        """تنظيف النص من علامات الاقتباس"""
-        if text is None:
-            return ""
-        return str(text).replace('"', '\\"').replace('\n', '\\n')
-    
-    @staticmethod
-    def _steps_to_code(steps: List[tuple]) -> str:
-        """تحويل الخطوات إلى كود"""
-        steps_code = []
-        for step in steps:
-            desc, latex = step
-            desc = CodeGenerator._escape_string(desc)
-            latex = CodeGenerator._escape_string(latex)
-            steps_code.append(f'    format_step("{desc}", "{latex}")')
-        return ',\n'.join(steps_code)
-    
-    @staticmethod
-    def calculator(expr: str, result: float, steps: List[tuple]) -> str:
-        """توليد كود آلة حاسبة"""
-        steps_code = CodeGenerator._steps_to_code(steps)
-        expr_clean = CodeGenerator._escape_string(expr)
-        
-        return f'''# كود آلة حاسبة
-import sympy as sp
-
-def format_step(text: str, latex: str = "") -> tuple:
-    return (text, latex)
-
-expr = sp.sympify("{expr_clean}")
-final_result = expr.evalf()
-steps = [
-{steps_code}
-]'''
-    
-    @staticmethod
-    def derivative(func: str, steps: List[tuple]) -> str:
-        """توليد كود مشتقة مع اكتشاف المتغيرات"""
-        # استخراج المتغيرات
-        variables = extract_variables_from_expr(func)
-        var_name = variables[0] if variables else 'x'
-        
-        steps_code = CodeGenerator._steps_to_code(steps)
-        func_clean = CodeGenerator._escape_string(func)
-        
-        return f'''# كود مشتقة
-import sympy as sp
-
-def format_step(text: str, latex: str = "") -> tuple:
-    return (text, latex)
-
-{var_name} = sp.symbols('{var_name}')
-f = sp.sympify("{func_clean}")
-final_result = sp.diff(f, {var_name})
-steps = [
-{steps_code}
-]'''
-    
-    @staticmethod
-    def integral(func: str, steps: List[tuple]) -> str:
-        """توليد كود تكامل مع اكتشاف المتغيرات"""
-        # استخراج المتغيرات
-        variables = extract_variables_from_expr(func)
-        var_name = variables[0] if variables else 'x'
-        
-        steps_code = CodeGenerator._steps_to_code(steps)
-        func_clean = CodeGenerator._escape_string(func)
-        
-        return f'''# كود تكامل
-import sympy as sp
-
-def format_step(text: str, latex: str = "") -> tuple:
-    return (text, latex)
-
-{var_name} = sp.symbols('{var_name}')
-f = sp.sympify("{func_clean}")
-final_result = sp.integrate(f, {var_name})
-steps = [
-{steps_code}
-]'''
-    
-    @staticmethod
-    def equation(eq: str, steps: List[tuple]) -> str:
-        """توليد كود معادلة مع اكتشاف المتغيرات"""
-        # استخراج المتغيرات
-        variables = extract_variables_from_expr(eq)
-        var_name = variables[0] if variables else 'x'
-        
-        steps_code = CodeGenerator._steps_to_code(steps)
-        eq_clean = CodeGenerator._escape_string(eq)
-        
-        left_part = eq.split('=')[0] if '=' in eq else eq
-        right_part = eq.split('=')[1] if '=' in eq else '0'
-        left_clean = CodeGenerator._escape_string(left_part)
-        right_clean = CodeGenerator._escape_string(right_part)
-        
-        return f'''# كود معادلة
-import sympy as sp
-
-def format_step(text: str, latex: str = "") -> tuple:
-    return (text, latex)
-
-{var_name} = sp.symbols('{var_name}')
-left = sp.sympify("{left_clean}")
-right = sp.sympify("{right_clean}")
-expr = left - right
-final_result = sp.solve(expr, {var_name})
-steps = [
-{steps_code}
-]'''
-    
-    @staticmethod
-    def ai_fallback(provider: str, result: str, steps: List[tuple]) -> str:
-        """توليد كود لنتيجة الذكاء الاصطناعي"""
-        result_clean = CodeGenerator._escape_string(result)
-        
-        steps_code = []
-        for step in steps:
-            desc, latex = step
-            desc = CodeGenerator._escape_string(desc)
-            latex = CodeGenerator._escape_string(latex)
-            steps_code.append(f'    ("{desc}", "{latex}")')
-        steps_str = ',\n'.join(steps_code)
-        
-        return f'''# إجابة {provider}
-result = "{result_clean}"
-steps = [
-{steps_str}
-]
-final_result = result'''
-
 # ========== محرك AI مع Fallback متعدد ==========
 class AIEngine:
     def __init__(self):
         self.math = SymbolicMath()
-        self.memory = Memory()
+        self.memory = SmartMemory()
         self.ready = True
         self.groq_key = GROQ_API_KEY
         self.gemini_key = GEMINI_API_KEY
-        self.code_gen = CodeGenerator()
-        print("✅ AI Engine ready - الإصدار النهائي مع جميع التحسينات")
+        print("✅ AI Engine ready - الإصدار الذكي مع الذاكرة الذكية المحسنة")
     
     def _is_simple_arithmetic(self, expr: str) -> bool:
-        """فحص إذا كان التعبير حسابياً بسيطاً (أرقام فقط)"""
+        """فحص إذا كان التعبير حسابياً بسيطاً"""
         cleaned = expr.replace(" ", "")
-        
-        # إذا كان هناك متغيرات، فليس حساباً بسيطاً
         if any(var in cleaned for var in ['x', 'y', 'z']):
             return False
-        
         allowed_chars = "0123456789+-*/()."
         return all(c in allowed_chars for c in cleaned)
-    
-    # ========== ✅ تم تعديل هذه الدالة فقط ==========
-    def _extract_math_expression(self, text: str) -> Optional[str]:
-        """استخراج التعبير الرياضي من النص بشكل دقيق (نسخة محسنة)"""
-        # تنظيف النص أولاً
-        cleaned = clean_math_input(text)
-        
-        # إزالة الكلمات الدالة
-        for word in ["مشتقة", "مشتق", "derivative", "diff", "تكامل", "integral", "حل", "solve"]:
-            cleaned = cleaned.replace(word, "").strip()
-        
-        # حفظ نسخة من النص الأصلي للأنماط التي تحتاج ^
-        original_with_caret = text.replace("^", "^")  # نحتفظ بـ ^
-        
-        # قائمة الأنماط المتقدمة (محسنة)
-        patterns = [
-            # نمط f(x) = ...
-            r'f\([xyz]\)\s*=\s*([^,\n]+)',
-            
-            # نمط دالة بين قوسين
-            r'[\(\s]*([a-zA-Z0-9\*\-\+\/\(\)\^]+(?:sin|cos|tan|log|exp|sqrt)[a-zA-Z0-9\*\-\+\/\(\)\^]*)[\)\s]*',
-            
-            # نمط أي تعبير رياضي مع دوال
-            r'([a-zA-Z0-9\*\-\+\/\(\)\^]+(?:sin|cos|tan|log|exp|sqrt)[a-zA-Z0-9\*\-\+\/\(\)\^]*)',
-            
-            # ✅ أنماط جديدة للأسس (مهمة للمشتقات والتكاملات)
-            r'([a-zA-Z0-9]+\^[0-9]+(?:\s*[\+\-\*\/]\s*[a-zA-Z0-9\^]+)*)',  # نمط للأسس (مثل x^5 + 2x^3)
-            r'([a-zA-Z0-9]+\*\*[0-9]+(?:\s*[\+\-\*\/]\s*[a-zA-Z0-9\*]+)*)',  # نمط لمتغير بقوة (مثل x**5)
-            
-            # نمط معادلة مع علامة =
-            r'([^=\s]+=[^=\s]+)',
-            
-            # نمط عام مع متغيرات متعددة
-            r'([xyz][\s\*\-\+\/\(\)\^]*[xyz]*(?:\s*[\+\-\*\/]\s*[xyz\da-zA-Z]+)*)',
-            
-            # آخر خيار: أي تعبير رياضي
-            r'([a-zA-Z0-9\*\-\+\/\(\)\^]+)',
-        ]
-        
-        # تجربة الأنماط على النص المنظف
-        for pattern in patterns:
-            match = re.search(pattern, cleaned, re.IGNORECASE)
-            if match:
-                expr = match.group(1).strip()
-                if expr and len(expr) > 0:
-                    # تأكد من تحويل ^ إلى **
-                    expr = expr.replace("^", "**")
-                    return expr
-        
-        # إذا فشلت المحاولة الأولى، جرب على النص الأصلي
-        for pattern in patterns:
-            match = re.search(pattern, original_with_caret, re.IGNORECASE)
-            if match:
-                expr = match.group(1).strip()
-                if expr and len(expr) > 0:
-                    expr = expr.replace("^", "**")
-                    return expr
-        
-        return None
     
     async def ask_gemini(self, question: str) -> Dict[str, Any]:
         """سؤال Gemini API"""
@@ -445,12 +501,32 @@ class AIEngine:
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.gemini_key}"
+                
+                # ✅ prompt محسن للترجمة إلى SymPy
+                prompt = f"""أنت مترجم رياضيات متخصص. مهمتك تحويل الأسئلة الرياضية إلى صيغة SymPy فقط.
+
+السؤال: {question}
+
+قواعد الترجمة:
+- المشتقات → استخدم diff(الدالة, المتغير)
+- التكاملات → استخدم integrate(الدالة, المتغير)
+- حل المعادلات → استخدم solve(المعادلة, المتغير)
+- العمليات الحسابية → اكتب التعبير كما هو
+
+أمثلة:
+1. "مشتقة sin(2x)" → diff(sin(2*x), x)
+2. "تكامل x^2" → integrate(x**2, x)
+3. "حل x^2 - 4 = 0" → solve(x**2 - 4, x)
+4. "2+2" → 2+2
+
+اكتب فقط التعبير بصيغة SymPy الصحيحة، بدون أي كلمات إضافية أو شرح."""
+                
                 response = await client.post(
                     url,
                     headers={"Content-Type": "application/json"},
                     json={
                         "contents": [{
-                            "parts": [{"text": question}]
+                            "parts": [{"text": prompt}]
                         }]
                     }
                 )
@@ -458,17 +534,13 @@ class AIEngine:
                 if response.status_code == 200:
                     data = response.json()
                     if "candidates" in data:
-                        answer = data["candidates"][0]["content"]["parts"][0]["text"]
-                        steps = [
-                            ("🤖 إجابة Gemini", ""),
-                            (answer, answer if is_math(answer) else ""),
-                        ]
+                        sympy_expr = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                        # تنظيف النتيجة من أي علامات اقتباس أو كلمات زائدة
+                        sympy_expr = re.sub(r'^["\']|["\']$', '', sympy_expr)
                         return {
                             "success": True,
-                            "result": answer,
-                            "steps": steps,
-                            "model": "gemini",
-                            "from_cache": False
+                            "sympy_expr": sympy_expr,
+                            "model": "gemini"
                         }
                 return {"success": False, "error": f"Gemini error: {response.status_code}"}
         except Exception as e:
@@ -482,6 +554,25 @@ class AIEngine:
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 url = "https://api.groq.com/openai/v1/chat/completions"
+                
+                prompt = f"""أنت مترجم رياضيات متخصص. مهمتك تحويل الأسئلة الرياضية إلى صيغة SymPy فقط.
+
+السؤال: {question}
+
+قواعد الترجمة:
+- المشتقات → استخدم diff(الدالة, المتغير)
+- التكاملات → استخدم integrate(الدالة, المتغير)
+- حل المعادلات → استخدم solve(المعادلة, المتغير)
+- العمليات الحسابية → اكتب التعبير كما هو
+
+أمثلة:
+1. "مشتقة sin(2x)" → diff(sin(2*x), x)
+2. "تكامل x^2" → integrate(x**2, x)
+3. "حل x^2 - 4 = 0" → solve(x**2 - 4, x)
+4. "2+2" → 2+2
+
+اكتب فقط التعبير بصيغة SymPy الصحيحة، بدون أي كلمات إضافية أو شرح."""
+                
                 response = await client.post(
                     url,
                     headers={
@@ -490,24 +581,20 @@ class AIEngine:
                     },
                     json={
                         "model": "mixtral-8x7b-32768",
-                        "messages": [{"role": "user", "content": question}],
-                        "temperature": 0.7
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.3  # درجة حرارة منخفضة لدقة أكبر
                     }
                 )
                 
                 if response.status_code == 200:
                     data = response.json()
-                    answer = data["choices"][0]["message"]["content"]
-                    steps = [
-                        ("🤖 إجابة Groq", ""),
-                        (answer, answer if is_math(answer) else ""),
-                    ]
+                    answer = data["choices"][0]["message"]["content"].strip()
+                    # تنظيف النتيجة
+                    answer = re.sub(r'^["\']|["\']$', '', answer)
                     return {
                         "success": True,
-                        "result": answer,
-                        "steps": steps,
-                        "model": "groq",
-                        "from_cache": False
+                        "sympy_expr": answer,
+                        "model": "groq"
                     }
                 return {"success": False, "error": f"Groq error: {response.status_code}"}
         except Exception as e:
@@ -522,101 +609,145 @@ class AIEngine:
         if self.groq_key:
             providers.append(("groq", self.ask_groq))
         
+        errors = []
         for provider_name, provider_func in providers:
             try:
+                print(f"🤖 محاولة مع {provider_name}...")
                 result = await provider_func(question)
                 if result.get("success"):
+                    print(f"✅ نجح {provider_name}")
                     return result
-            except Exception:
+                else:
+                    errors.append(f"{provider_name}: {result.get('error')}")
+            except Exception as e:
+                errors.append(f"{provider_name}: {str(e)}")
                 continue
         
-        return {"success": False, "error": "جميع مزودي الذكاء الاصطناعي غير متاحين"}
+        return {"success": False, "error": f"جميع مزودي الذكاء الاصطناعي غير متاحين: {', '.join(errors)}"}
     
+    # ========== الدالة الرئيسية المعدلة ==========
     async def generate_code(self, question: str, domain: str = "general") -> Dict[str, Any]:
-        """توليد كود SymPy متوافق مع MathEngine"""
+        """
+        الآلية الذكية:
+        1. 🔍 البحث في الذاكرة (نص + أنماط)
+        2. 📊 إذا كان السؤال بسيطاً → حل مباشر
+        3. 🤖 إذا لا → استدعاء AI للترجمة إلى SymPy
+        4. 🧮 حل المسألة باستخدام SymPy
+        5. 💾 حفظ في الذاكرة
+        """
         
-        # تطبيع السؤال للذاكرة
-        normalized = normalize_question(question)
+        print(f"\n{'='*60}")
+        print(f"🔍 معالجة السؤال: {question}")
+        print(f"{'='*60}")
         
-        # التحقق من الذاكرة
-        cached = self.memory.get(normalized)
+        # 1️⃣ البحث في الذاكرة الذكية
+        cached = self.memory.get(question)
         if cached:
-            cached["from_cache"] = True
+            print(f"✅ تم العثور على الحل في الذاكرة!")
             return cached
         
-        result = ""
-        steps = []
-        model = ""
-        code = ""
+        # 2️⃣ الأسئلة البسيطة (بدون AI)
+        normalized = normalize_question(question)
         
-        try:
-            # آلة حاسبة (أرقام فقط)
-            if self._is_simple_arithmetic(normalized):
-                result, steps = self.math.calculator(normalized)
-                code = self.code_gen.calculator(
-                    normalized, 
-                    float(result) if result != "خطأ" else 0, 
-                    steps
-                )
-                model = "calculator"
-            
-            # مشتقات
-            elif any(word in question for word in ["مشتق", "derivative", "diff"]):
-                expr = self._extract_math_expression(question)
-                if expr:
-                    result, steps = self.math.derivative(expr)
-                    code = self.code_gen.derivative(expr, steps)
-                    model = "derivative"
-                else:
-                    return {"success": False, "error": "لم نتمكن من استخراج الدالة"}
-            
-            # تكاملات
-            elif any(word in question for word in ["تكامل", "integral"]):
-                expr = self._extract_math_expression(question)
-                if expr:
-                    result, steps = self.math.integral(expr)
-                    code = self.code_gen.integral(expr, steps)
-                    model = "integral"
-                else:
-                    return {"success": False, "error": "لم نتمكن من استخراج الدالة"}
-            
-            # معادلات
-            elif any(word in question for word in ["حل", "solve"]) or "=" in normalized:
-                result, steps = self.math.equation(normalized)
-                code = self.code_gen.equation(normalized, steps)
-                model = "equation"
-            
-            # AI Fallback مع عدة مزودين
-            else:
-                ai_result = await self._try_ai_fallback(question)
-                if ai_result.get("success"):
-                    code = self.code_gen.ai_fallback(
-                        ai_result["model"],
-                        ai_result["result"],
-                        ai_result["steps"]
-                    )
-                    ai_result["code"] = code
-                    self.memory.set(normalized, ai_result)
-                    return ai_result
-                else:
-                    return {"success": False, "error": "لم يتم التعرف على نوع المسألة"}
-            
-            # تجهيز النتيجة مع الكود
+        # آلة حاسبة
+        if self._is_simple_arithmetic(normalized):
+            print("📊 استخدام الآلة الحاسبة")
+            result, steps = self.math.calculator(normalized)
             response = {
                 "success": True,
                 "result": result,
                 "steps": steps,
-                "code": code,
+                "model": "calculator",
+                "from_cache": False
+            }
+            self.memory.set(question, response)
+            return response
+        
+        # معادلات بسيطة
+        if "=" in normalized and len(normalized.split("=")) == 2:
+            print("⚖️ استخدام حل المعادلات")
+            result, steps = self.math.equation(normalized)
+            response = {
+                "success": True,
+                "result": result,
+                "steps": steps,
+                "model": "equation",
+                "from_cache": False
+            }
+            self.memory.set(question, response)
+            return response
+        
+        # 3️⃣ استدعاء AI للترجمة إلى SymPy
+        print("🤖 استدعاء الذكاء الاصطناعي للترجمة...")
+        ai_result = await self._try_ai_fallback(question)
+        
+        if not ai_result.get("success"):
+            error_msg = ai_result.get("error", "فشل في ترجمة السؤال")
+            print(f"❌ فشل AI: {error_msg}")
+            return {"success": False, "error": error_msg}
+        
+        sympy_expr = ai_result["sympy_expr"]
+        print(f"📝 التعبير المُترجم: {sympy_expr}")
+        
+        # 4️⃣ تنفيذ التعبير باستخدام SymPy
+        try:
+            result = ""
+            steps = []
+            model = ai_result["model"]
+            
+            # تحديد نوع العملية من التعبير
+            if sympy_expr.startswith("diff"):
+                # مشتقة
+                func_match = re.search(r'diff\(([^,]+),', sympy_expr)
+                if func_match:
+                    func = func_match.group(1).strip()
+                    print(f"🔢 حساب مشتقة: {func}")
+                    result, steps = self.math.derivative(func)
+                    model = f"{model}_derivative"
+            
+            elif sympy_expr.startswith("integrate"):
+                # تكامل
+                func_match = re.search(r'integrate\(([^,]+),', sympy_expr)
+                if func_match:
+                    func = func_match.group(1).strip()
+                    print(f"∫ حساب تكامل: {func}")
+                    result, steps = self.math.integral(func)
+                    model = f"{model}_integral"
+            
+            elif sympy_expr.startswith("solve"):
+                # معادلة
+                eq_match = re.search(r'solve\(([^,]+),', sympy_expr)
+                if eq_match:
+                    eq = eq_match.group(1).strip()
+                    print(f"⚖️ حل معادلة: {eq}")
+                    result, steps = self.math.equation(eq)
+                    model = f"{model}_equation"
+            
+            else:
+                # تعبير عادي
+                print(f"🧮 حساب تعبير: {sympy_expr}")
+                result, steps = self.math.calculator(sympy_expr)
+                model = f"{model}_expression"
+            
+            # تجهيز الرد
+            response = {
+                "success": True,
+                "result": result,
+                "steps": steps,
                 "model": model,
                 "from_cache": False
             }
             
-            # حفظ في الذاكرة
-            self.memory.set(normalized, response)
+            # 5️⃣ حفظ في الذاكرة للاستخدام المستقبلي
+            self.memory.set(question, response)
+            print(f"✅ تم حفظ الحل في الذاكرة")
+            
             return response
             
         except Exception as e:
-            return {"success": False, "error": f"خطأ في الحساب: {str(e)}"}
+            error_msg = f"خطأ في تنفيذ التعبير: {str(e)}"
+            print(f"❌ {error_msg}")
+            return {"success": False, "error": error_msg}
     
     def get_stats(self):
         return {
@@ -624,9 +755,7 @@ class AIEngine:
         }
     
     async def start(self):
-        """بدء تشغيل المحرك"""
         pass
     
     async def stop(self):
-        """إيقاف المحرك"""
         pass
