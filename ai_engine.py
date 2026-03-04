@@ -1,109 +1,106 @@
-class SymbolicMath:
-    """محرك الرياضيات الرمزية"""
-    
+# ai_engine.py - إصدار الإطلاق السريع
+import sympy as sp
+import re
+import hashlib
+from typing import Dict, Any, Optional, Tuple, List
+
+def clean_math_input(text: str) -> str:
+    text = text.lower()
+    text = text.replace("²", "**2").replace("³", "**3")
+    text = text.replace("^", "**").replace("×", "*").replace("÷", "/")
+    text = text.replace(" ", "")
+    return text
+
+class Memory:
     def __init__(self):
+        self.cache = {}
+    
+    def _make_key(self, text: str) -> str:
+        return hashlib.md5(text.encode()).hexdigest()
+    
+    def get(self, text: str) -> Optional[Dict]:
+        key = self._make_key(text)
+        return self.cache.get(key)
+    
+    def set(self, text: str, value: Dict):
+        key = self._make_key(text)
+        self.cache[key] = value
+
+class AIEngine:
+    def __init__(self):
+        self.math = sp
+        self.memory = Memory()
         self.x, self.y, self.z = sp.symbols('x y z')
+        print("✅ AI Engine ready - إصدار الإطلاق")
     
-    def calculator(self, expr: str) -> Tuple[str, List[tuple]]:
-        """آلة حاسبة آمنة"""
+    async def generate_code(self, question: str) -> Dict[str, Any]:
+        normalized = clean_math_input(question)
+        
+        # 1️⃣ بحث في الذاكرة
+        cached = self.memory.get(normalized)
+        if cached:
+            return cached
+        
         try:
-            result_expr = safe_sympify(expr)
-            result = result_expr.evalf()
-            result_latex = to_latex(result)
-            expr_latex = to_latex(result_expr)
+            # 2️⃣ آلة حاسبة
+            if all(c in "0123456789+-*/()." for c in normalized):
+                result = sp.sympify(normalized).evalf()
+                response = {
+                    "success": True,
+                    "result": str(result),
+                    "steps": [("🔢", f"{normalized} = {result}")],
+                    "model": "calculator"
+                }
+                self.memory.set(normalized, response)
+                return response
             
-            steps = [
-                ("🔢 عملية حسابية", ""),
-                (f"التعبير: {expr_latex}", expr_latex),
-                (f"النتيجة: {result_latex}", result_latex),
-                ("✅ الإجابة النهائية:", f"\\boxed{{{result_latex}}}")
-            ]
-            return str(result), steps
+            # 3️⃣ معادلة
+            if "=" in normalized:
+                left, right = normalized.split("=")
+                expr = sp.sympify(left) - sp.sympify(right)
+                var = list(expr.free_symbols)[0] if expr.free_symbols else self.x
+                solutions = sp.solve(expr, var)
+                sol_str = ' أو '.join([f"{var} = {s}" for s in solutions])
+                response = {
+                    "success": True,
+                    "result": sol_str,
+                    "steps": [("⚖️", f"{question} → {sol_str}")],
+                    "model": "equation"
+                }
+                self.memory.set(normalized, response)
+                return response
+            
+            # 4️⃣ مشتقة
+            if "مشتق" in question:
+                expr = normalized.replace("مشتقة", "").replace("مشتق", "")
+                f = sp.sympify(expr)
+                var = list(f.free_symbols)[0] if f.free_symbols else self.x
+                result = sp.diff(f, var)
+                response = {
+                    "success": True,
+                    "result": str(result),
+                    "steps": [("📐", f"d/d{var}({expr}) = {result}")],
+                    "model": "derivative"
+                }
+                self.memory.set(normalized, response)
+                return response
+            
+            # 5️⃣ تكامل
+            if "تكامل" in question:
+                expr = normalized.replace("تكامل", "")
+                f = sp.sympify(expr)
+                var = list(f.free_symbols)[0] if f.free_symbols else self.x
+                result = sp.integrate(f, var)
+                response = {
+                    "success": True,
+                    "result": str(result) + " + C",
+                    "steps": [("∫", f"∫{expr} d{var} = {result} + C")],
+                    "model": "integral"
+                }
+                self.memory.set(normalized, response)
+                return response
+            
+            return {"success": False, "error": "لم أفهم السؤال"}
+            
         except Exception as e:
-            return "خطأ", [(f"❌ {str(e)}", "")]
-    
-    def derivative(self, func: str) -> Tuple[str, List[tuple]]:
-        """حساب المشتقة"""
-        try:
-            expr = safe_sympify(func)
-            var = extract_variable(expr)
-            result = sp.diff(expr, var)
-            var_name = var.name
-            
-            result_str = str(result)
-            
-            steps = [
-                (f"📐 مشتقة بالنسبة لـ {var_name}", ""),
-                (f"f({var_name}) = {to_latex(expr)}", to_latex(expr)),
-                ("نطبق قواعد الاشتقاق:", ""),
-                (f"f'({var_name}) = {to_latex(result)}", to_latex(result)),
-                ("✅ الإجابة النهائية:", f"\\boxed{{{to_latex(result)}}}")
-            ]
-            return result_str, steps
-        except Exception as e:
-            return "خطأ", [(f"❌ {str(e)}", "")]
-    
-    def integral(self, func: str) -> Tuple[str, List[tuple]]:
-        """حساب التكامل"""
-        try:
-            expr = safe_sympify(func)
-            var = extract_variable(expr)
-            result = sp.integrate(expr, var)
-            var_name = var.name
-            
-            # ✅ التأكد من أن النتيجة نصية
-            result_str = str(result)
-            if result_str and result_str != "0":
-                result_str = result_str + " + C"
-            else:
-                result_str = "خطأ في التكامل"
-            
-            steps = [
-                (f"📊 تكامل بالنسبة لـ {var_name}", ""),
-                (f"∫ {to_latex(expr)} d{var_name}", f"∫ {to_latex(expr)} d{var_name}"),
-                ("نطبق قواعد التكامل:", ""),
-                (f"= {to_latex(result)} + C", f"{to_latex(result)} + C"),
-                ("✅ الإجابة النهائية:", f"\\boxed{{{to_latex(result)} + C}}")
-            ]
-            return result_str, steps
-        except Exception as e:
-            return "خطأ", [(f"❌ {str(e)}", "")]
-    
-    def equation(self, eq: str) -> Tuple[str, List[tuple]]:
-        """حل المعادلة"""
-        try:
-            if "=" in eq:
-                left, right = eq.split("=")
-                left_expr = safe_sympify(left)
-                right_expr = safe_sympify(right)
-                expr = left_expr - right_expr
-            else:
-                left_expr = safe_sympify(eq)
-                right_expr = 0
-                expr = left_expr
-            
-            var = extract_variable(expr)
-            solutions = sp.solve(expr, var)
-            var_name = var.name
-            
-            sol_list = []
-            for sol in solutions:
-                if sol.is_real:
-                    sol_list.append(f"{var_name} = {to_latex(sol)}")
-                else:
-                    sol_list.append(f"{var_name} = {to_latex(sol)} (مركب)")
-            
-            sol_str = '  أو  '.join(sol_list) if sol_list else "لا يوجد حل حقيقي"
-            
-            steps = [
-                ("⚖️ معادلة", ""),
-                (f"{to_latex(left_expr)} = {to_latex(right_expr)}", f"{to_latex(left_expr)} = {to_latex(right_expr)}"),
-                ("ننقل الحدود:", ""),
-                (f"{to_latex(expr)} = 0", f"{to_latex(expr)} = 0"),
-                ("الحلول:", ""),
-                (sol_str, sol_str),
-                ("✅ الإجابة النهائية:", f"\\boxed{{{sol_str}}}")
-            ]
-            return sol_str, steps
-        except Exception as e:
-            return "خطأ", [(f"❌ {str(e)}", "")]
+            return {"success": False, "error": str(e)}
