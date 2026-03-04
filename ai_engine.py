@@ -1,4 +1,4 @@
-# ai_engine.py - الإصدار النهائي مع جميع التحسينات (v3.0)
+# ai_engine.py - الإصدار النهائي مع جميع التحسينات (v3.1)
 import re
 import hashlib
 import json
@@ -286,7 +286,34 @@ class AIEngine:
                     }
         return None
     
-    # ... (باقي القوالب الأساسية مع تحسينات مشابهة)
+    # ✅ دوال أساسية مؤقتة (ترجع None) لتجنب الأخطاء
+    async def template_factorial(self, question: str) -> Optional[Dict]:
+        """قالب مضروب (مؤقت)"""
+        return None
+    
+    async def template_percent(self, question: str) -> Optional[Dict]:
+        """قالب نسبة مئوية (مؤقت)"""
+        return None
+    
+    async def template_absolute(self, question: str) -> Optional[Dict]:
+        """قالب قيمة مطلقة (مؤقت)"""
+        return None
+    
+    async def template_gcd(self, question: str) -> Optional[Dict]:
+        """قالب قاسم مشترك (مؤقت)"""
+        return None
+    
+    async def template_lcm(self, question: str) -> Optional[Dict]:
+        """قالب مضاعف مشترك (مؤقت)"""
+        return None
+    
+    async def template_log10(self, question: str) -> Optional[Dict]:
+        """قالب لوغاريتم عشري (مؤقت)"""
+        return None
+    
+    async def template_ln(self, question: str) -> Optional[Dict]:
+        """قالب لوغاريتم طبيعي (مؤقت)"""
+        return None
     
     # ========== معادلات (10 قوالب فهم) ==========
     
@@ -440,43 +467,53 @@ class AIEngine:
         
         return None
     
-    # ========== مشتقات (10 قوالب فهم) محسنة ==========
-    
-    async def template_derivative(self, question: str) -> Optional[Dict]:
-        """
-        قالب مشتقة عام
-        أمثلة: "مشتقة sin(2x)", "derivative of x^3 + 2x", "d/dx (x^2)"
-        """
-        # محاولة استخراج الدالة
-        func = None
-        
-        # نمط: مشتقة [دالة]
-        match = re.search(r'(مشتق|derivative|مشتقة).*?([a-zA-Z0-9\*\^\+\-\/\(\)]+)', question.lower())
-        if match:
-            func = match.group(2).strip()
-        
-        # نمط: d/dx (دالة)
-        match = re.search(r'd/dx\s*\(?([^\)]+)\)?', question.lower())
-        if match:
-            func = match.group(1).strip()
-        
-        if func:
-            # محاولة تحويل ^ إلى **
-            func = func.replace('^', '**')
-            
-            # استخدام sympify للتحقق من صحة الدالة
-            try:
-                sp.sympify(func)
-                # لا نستطيع استدعاء derivative مباشرة لأننا لا نعرف النوع
-                # سنمرر الدالة إلى math_engine بطريقة عامة
-                result = await self.math_engine.derivative_power(2)  # مؤقت
-                # هذا يحتاج تحسين في math_engine لقبول دالة عامة
-            except:
-                pass
-        
+    async def template_cubic(self, question: str) -> Optional[Dict]:
+        """قالب معادلة تكعيبية (مؤقت)"""
         return None
     
-    # ========== تكاملات (10 قوالب فهم) محسنة ==========
+    # ========== مشتقات (10 قوالب فهم) ==========
+    
+    async def template_derivative_power(self, question: str) -> Optional[Dict]:
+        """قالب مشتقة قوة (مؤقت)"""
+        return None
+    
+    async def template_derivative_sin(self, question: str) -> Optional[Dict]:
+        """قالب مشتقة sin (مؤقت)"""
+        return None
+    
+    async def template_derivative_cos(self, question: str) -> Optional[Dict]:
+        """قالب مشتقة cos (مؤقت)"""
+        return None
+    
+    async def template_derivative_tan(self, question: str) -> Optional[Dict]:
+        """قالب مشتقة tan (مؤقت)"""
+        return None
+    
+    async def template_derivative_exp(self, question: str) -> Optional[Dict]:
+        """قالب مشتقة e^x (مؤقت)"""
+        return None
+    
+    async def template_derivative_ln(self, question: str) -> Optional[Dict]:
+        """قالب مشتقة ln (مؤقت)"""
+        return None
+    
+    # ========== تكاملات (10 قوالب فهم) ==========
+    
+    async def template_integral_power(self, question: str) -> Optional[Dict]:
+        """قالب تكامل قوة (مؤقت)"""
+        return None
+    
+    async def template_integral_sin(self, question: str) -> Optional[Dict]:
+        """قالب تكامل sin (مؤقت)"""
+        return None
+    
+    async def template_integral_cos(self, question: str) -> Optional[Dict]:
+        """قالب تكامل cos (مؤقت)"""
+        return None
+    
+    async def template_integral_exp(self, question: str) -> Optional[Dict]:
+        """قالب تكامل e^x (مؤقت)"""
+        return None
     
     async def template_integral_definite_improved(self, question: str) -> Optional[Dict]:
         """
@@ -637,6 +674,32 @@ class AIEngine:
         
         return None
     
+    # ========== نهايات (5 قوالب فهم) ==========
+    
+    async def template_limit(self, question: str) -> Optional[Dict]:
+        """قالب نهاية (مؤقت)"""
+        return None
+    
+    # ========== إحصاء (5 قوالب فهم) ==========
+    
+    async def template_mean(self, question: str) -> Optional[Dict]:
+        """قالب متوسط (مؤقت)"""
+        return None
+    
+    async def template_median(self, question: str) -> Optional[Dict]:
+        """قالب وسيط (مؤقت)"""
+        return None
+    
+    # ========== مثلثات (5 قوالب فهم) ==========
+    
+    async def template_sin(self, question: str) -> Optional[Dict]:
+        """قالب sin (مؤقت)"""
+        return None
+    
+    async def template_cos(self, question: str) -> Optional[Dict]:
+        """قالب cos (مؤقت)"""
+        return None
+    
     # ========== الدالة الرئيسية ==========
     
     async def generate_code(self, question: str) -> Dict[str, Any]:
@@ -652,10 +715,12 @@ class AIEngine:
         
         # 2️⃣ تجربة جميع القوالب بالترتيب
         templates = [
-            # أساسيات
+            # أساسيات (الدوال الموجودة فقط)
             self.template_calculator,
             self.template_power,
             self.template_sqrt,
+            
+            # الدوال الأساسية المؤقتة (ترجع None)
             self.template_factorial,
             self.template_percent,
             self.template_absolute,
