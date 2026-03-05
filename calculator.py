@@ -223,6 +223,7 @@ class Calculator:
                     }
         return None
     
+    # ✅ هذا هو الجزء الذي تم تعديله فقط
     def _parse_expr(self, expr_str: str, use_cache: bool = True):
         """تحويل النص إلى تعبير SymPy"""
         if not expr_str:
@@ -237,20 +238,31 @@ class Calculator:
         expr_str = re.sub(r'(\d+)!', r'factorial(\1)', expr_str)
         
         try:
-            expr = parse_expr(
-                expr_str,
-                local_dict=self.local_dict,
-                transformations=self.transformations,
-                global_dict={},
-                evaluate=True
-            )
+            # ✅ استخدام sympify بدلاً من parse_expr (أكثر استقراراً)
+            from sympy import sympify
+            expr = sympify(expr_str, locals=self.local_dict)
             
             if use_cache:
                 self.cache.put(expr_str, expr)
             
             return expr
         except Exception as e:
-            raise ValueError(f"تعبير غير صالح: {e}")
+            # إذا فشل sympify، جرب parse_expr كاحتياط
+            try:
+                expr = parse_expr(
+                    expr_str,
+                    local_dict=self.local_dict,
+                    transformations=self.transformations,
+                    global_dict={},
+                    evaluate=True
+                )
+                
+                if use_cache:
+                    self.cache.put(expr_str, expr)
+                
+                return expr
+            except Exception as e2:
+                raise ValueError(f"تعبير غير صالح: {e2}")
     
     # ========== دوال الرسم البياني المحسّنة (تدعم kwargs) ==========
     def plot(self, expression: str = None, var: str = 'x', 
