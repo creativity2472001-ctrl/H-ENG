@@ -1,34 +1,65 @@
-# math_engine.py - محرك العمليات الحسابية المتوافق مع ai_engine.py
+# math_engine.py - محرك العمليات الحسابية المتوافق مع ai_engine.py (v2.0)
 import sympy as sp
 import math
 import logging
-from typing import List, Optional, Any, Dict, Tuple, Union
+import asyncio
+import hashlib
+from typing import List, Optional, Any, Dict, Tuple, Union, Callable
+from datetime import datetime
 from dataclasses import dataclass, field
 
 # إعداد التسجيل
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# ========== ثوابت الأمان (مطابقة لـ ai_engine.py) ==========
-MAX_MATRIX_SIZE = 10  # الحد الأقصى لحجم المصفوفة (10x10)
+# ========== ثوابت الأمان ==========
+MAX_INPUT_LENGTH = 300
+MAX_MATRIX_SIZE = 10
+TIMEOUT_SECONDS = 5
+
+# ========== البيئة الآمنة لـ SymPy ==========
+ALLOWED_SYMBOLS = {
+    'x': sp.Symbol('x'), 'y': sp.Symbol('y'), 'z': sp.Symbol('z'), 't': sp.Symbol('t'),
+    'n': sp.Symbol('n'), 'k': sp.Symbol('k'),
+    'pi': sp.pi, 'E': sp.E, 'I': sp.I, 'oo': sp.oo,
+    'sin': sp.sin, 'cos': sp.cos, 'tan': sp.tan, 'cot': sp.cot,
+    'sec': sp.sec, 'csc': sp.csc, 'asin': sp.asin, 'acos': sp.acos,
+    'atan': sp.atan, 'acot': sp.acot,
+    'sinh': sp.sinh, 'cosh': sp.cosh, 'tanh': sp.tanh,
+    'asinh': sp.asinh, 'acosh': sp.acosh, 'atanh': sp.atanh,
+    'log': sp.log, 'ln': sp.log, 'exp': sp.exp, 'sqrt': sp.sqrt,
+    'Abs': sp.Abs, 'sign': sp.sign, 'floor': sp.floor, 'ceiling': sp.ceiling,
+    'gamma': sp.gamma, 'beta': sp.beta,
+}
+
+# الكلمات المحظورة
+FORBIDDEN_PATTERNS = ["__", "lambda", "import", "exec", "eval", "globals", "locals", "__builtins__"]
 
 @dataclass
 class Step:
-    """خطوة حل واحدة - متوافق مع ai_engine.py"""
-    text: str
-    latex: str = ""
+    """خطوة حل واحدة - متوافق مع ai_engine.py v8.0"""
+    icon: str  # 📥, 🔍, 📝, 🧮, ✅, ⚠️, etc.
+    title: str
+    content: str
+    latex: Optional[str] = None
     
     def to_dict(self) -> dict:
-        return {"text": self.text, "latex": self.latex}
+        return {
+            "icon": self.icon,
+            "title": self.title,
+            "content": self.content,
+            "latex": self.latex
+        }
 
 @dataclass
 class ExecutionResult:
-    """نتيجة تنفيذ عملية حسابية - متوافق مع ai_engine.py"""
+    """نتيجة تنفيذ عملية حسابية - متوافق مع ai_engine.py v8.0"""
     success: bool
     result: Any = None
     result_str: str = ""
     steps: List[Step] = field(default_factory=list)
     error: Optional[str] = None
+    model: str = ""
     
     def to_dict(self) -> dict:
         return {
@@ -36,163 +67,201 @@ class ExecutionResult:
             "result": str(self.result) if self.result is not None else None,
             "result_str": self.result_str,
             "steps": [step.to_dict() for step in self.steps],
-            "error": self.error
+            "error": self.error,
+            "model": self.model
         }
 
 # دوال مساعدة إحصائية
 def _calculate_mean(data: List[float]) -> float:
-    """حساب المتوسط الحسابي"""
-    if not data:
-        return 0
+    if not data: return 0
     return sum(data) / len(data)
 
 def _calculate_variance(data: List[float], mean_val: float = None, sample: bool = False) -> float:
-    """حساب التباين"""
-    if not data or len(data) < 2:
-        return 0
-    if mean_val is None:
-        mean_val = _calculate_mean(data)
-    
+    if not data or len(data) < 2: return 0
+    if mean_val is None: mean_val = _calculate_mean(data)
     n = len(data)
     sum_sq = sum((x - mean_val) ** 2 for x in data)
-    
-    if sample:
-        return sum_sq / (n - 1) if n > 1 else 0
-    else:
-        return sum_sq / n
+    return sum_sq / (n - 1) if sample else sum_sq / n
 
 def _calculate_std_dev(data: List[float], mean_val: float = None, sample: bool = False) -> float:
-    """حساب الانحراف المعياري"""
-    variance = _calculate_variance(data, mean_val, sample)
-    return variance ** 0.5
+    return _calculate_variance(data, mean_val, sample) ** 0.5
+
+def safe_sympify(expr_str: str) -> Optional[sp.Expr]:
+    """تحويل آمن للتعبيرات الرياضية - مطابق لـ ai_engine.py"""
+    if not expr_str or len(expr_str) > MAX_INPUT_LENGTH:
+        return None
+    
+    expr_lower = expr_str.lower()
+    for bad in FORBIDDEN_PATTERNS:
+        if bad in expr_lower:
+            logger.warning(f"Forbidden pattern detected: {bad}")
+            return None
+    
+    try:
+        expr_str = expr_str.replace('^', '**').replace(' ', '')
+        from sympy.parsing.sympy_parser import parse_expr, standard_transformations, implicit_multiplication_application
+        transformations = (standard_transformations + (implicit_multiplication_application,))
+        
+        return parse_expr(
+            expr_str,
+            transformations=transformations,
+            local_dict=ALLOWED_SYMBOLS,
+            global_dict={},
+            evaluate=True
+        )
+    except Exception as e:
+        logger.debug(f"Safe sympify error: {e}")
+        return None
+
+async def run_with_timeout(func: Callable, *args, timeout=TIMEOUT_SECONDS):
+    """تشغيل دالة مع مهلة زمنية"""
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(func, *args), timeout=timeout)
+    except asyncio.TimeoutError:
+        logger.warning(f"Operation timed out after {timeout} seconds")
+        return ExecutionResult(success=False, error=f"انتهت المهلة الزمنية ({timeout} ثوانٍ)", model="timeout")
+    except Exception as e:
+        logger.error(f"Error in timed operation: {e}")
+        return ExecutionResult(success=False, error=str(e), model="error")
 
 class MathEngine:
-    """محرك العمليات الحسابية - متوافق مع ai_engine.py"""
+    """محرك العمليات الحسابية - 60 قالب - متوافق مع ai_engine.py v8.0"""
     
     def __init__(self):
-        # تعريف المتغيرات الرمزية الأساسية
         self.x, self.y, self.z, self.t = sp.symbols('x y z t')
         self.n, self.k = sp.symbols('n k')
-        
         self.execution_count = 0
         self.history = []
         self.max_history = 1000
         
-        print("✅ Math Engine v1.0 - متوافق مع AI Engine")
-        logger.info("Math Engine initialized")
+        print("✅ Math Engine v2.0 - 60 قالب حسابي - متوافق مع AI Engine v8.0")
+        logger.info("Math Engine v2.0 initialized")
     
     def _log_operation(self, operation: str, params: dict, result: Any):
-        """تسجيل عملية في السجل"""
         self.history.append({
+            "timestamp": datetime.now().isoformat(),
             "operation": operation,
             "params": params,
             "result": str(result)[:200]
         })
-        
         if len(self.history) > self.max_history:
             self.history = self.history[-self.max_history:]
     
     def _increment_count(self):
-        """زيادة عداد التنفيذ"""
         self.execution_count += 1
     
     def _validate_angle_for_asin(self, value: float) -> bool:
-        """تدقيق أن قيمة arcsin ضمن [-1, 1]"""
         return -1 <= value <= 1
     
     # ========== الأساسيات (10 قوالب) ==========
     
-    def calculate(self, expr: sp.Expr) -> ExecutionResult:
-        """قالب 1: آلة حاسبة بسيطة"""
+    async def calculate(self, expression: str) -> ExecutionResult:
+        """قالب 1: آلة حاسبة بسيطة - تستقبل نص"""
         try:
+            expr = safe_sympify(expression)
+            if expr is None:
+                return ExecutionResult(success=False, error="تعبير غير صالح", model="calculate")
+            
             result = expr.evalf()
             result_float = float(result)
             
-            self._increment_count()
-            self._log_operation("calculate", {"expr": str(expr)}, result_float)
-            
-            steps = [Step("🔢 عملية حسابية", f"{expr} = {result_float}")]
+            steps = [
+                Step("📥", "السؤال", f"حساب: {expression}"),
+                Step("🔍", "التحليل", "تعبير رياضي بسيط"),
+                Step("🧮", "الحساب", f"{expression} = {result_float}")
+            ]
             
             if result.is_Rational and result.q != 1:
-                steps.append(Step("📝 القيمة الدقيقة", str(expr)))
+                steps.append(Step("📝", "القيمة الدقيقة", str(expr), sp.latex(expr)))
+            
+            steps.append(Step("✅", "النتيجة", str(result_float)))
+            
+            self._increment_count()
+            self._log_operation("calculate", {"expression": expression}, result_float)
             
             return ExecutionResult(
                 success=True,
                 result=result_float,
                 result_str=str(result_float),
-                steps=steps
+                steps=steps,
+                model="calculate"
             )
         except Exception as e:
             logger.error(f"Error in calculate: {e}")
-            return ExecutionResult(
-                success=False,
-                error=f"خطأ في الحساب: {str(e)}"
-            )
+            return ExecutionResult(success=False, error=str(e), model="calculate")
     
-    def power(self, base: float, exp: float) -> ExecutionResult:
+    async def power(self, base: float, exponent: float) -> ExecutionResult:
         """قالب 2: رفع لقوة"""
         try:
-            result = base ** exp
+            result = base ** exponent
+            steps = [
+                Step("📥", "السؤال", f"حساب {base} ^ {exponent}"),
+                Step("🔍", "التحليل", f"رفع {base} إلى القوة {exponent}"),
+                Step("🧮", "الحساب", f"{base}^{exponent} = {result}"),
+                Step("✅", "النتيجة", str(result))
+            ]
+            
             self._increment_count()
-            self._log_operation("power", {"base": base, "exp": exp}, result)
+            self._log_operation("power", {"base": base, "exponent": exponent}, result)
             
             return ExecutionResult(
                 success=True,
                 result=result,
                 result_str=str(result),
-                steps=[Step("📈 رفع لقوة", f"{base}^{exp} = {result}")]
+                steps=steps,
+                model="power"
             )
         except Exception as e:
-            logger.error(f"Error in power: {e}")
-            return ExecutionResult(
-                success=False,
-                error=f"خطأ في رفع القوة: {str(e)}"
-            )
+            return ExecutionResult(success=False, error=str(e), model="power")
     
-    def sqrt(self, num: float) -> ExecutionResult:
+    async def sqrt(self, number: float) -> ExecutionResult:
         """قالب 3: جذر تربيعي"""
         try:
-            if num < 0:
-                result = sp.sqrt(num)
-                result_str = str(result)
-                steps = [Step("🔮 جذر تربيعي (عدد مركب)", f"√{num} = {result_str}")]
+            if number < 0:
+                result = sp.sqrt(number)
+                steps = [
+                    Step("📥", "السؤال", f"√{number}"),
+                    Step("🔍", "التحليل", "الجذر التربيعي لعدد سالب يعطي عدداً مركباً"),
+                    Step("🧮", "الحساب", f"√{number} = {result}"),
+                    Step("✅", "النتيجة", str(result))
+                ]
             else:
-                result = num ** 0.5
-                result_str = str(result)
-                steps = [Step("√ جذر تربيعي", f"√{num} = {result_str}")]
+                result = number ** 0.5
+                steps = [
+                    Step("📥", "السؤال", f"√{number}"),
+                    Step("🔍", "التحليل", f"إيجاد الجذر التربيعي لـ {number}"),
+                    Step("🧮", "الحساب", f"√{number} = {result}"),
+                    Step("✅", "النتيجة", str(result))
+                ]
             
             self._increment_count()
-            self._log_operation("sqrt", {"num": num}, result)
+            self._log_operation("sqrt", {"number": number}, result)
             
             return ExecutionResult(
                 success=True,
                 result=result,
-                result_str=result_str,
-                steps=steps
+                result_str=str(result),
+                steps=steps,
+                model="sqrt"
             )
         except Exception as e:
-            logger.error(f"Error in sqrt: {e}")
-            return ExecutionResult(
-                success=False,
-                error=f"خطأ في حساب الجذر: {str(e)}"
-            )
+            return ExecutionResult(success=False, error=str(e), model="sqrt")
     
-    def factorial(self, n: int) -> ExecutionResult:
+    async def factorial(self, n: int) -> ExecutionResult:
         """قالب 4: مضروب"""
         try:
             if n < 0:
-                return ExecutionResult(
-                    success=False,
-                    error="لا يمكن حساب مضروب لعدد سالب"
-                )
-            
+                return ExecutionResult(success=False, error="لا يمكن حساب مضروب لعدد سالب", model="factorial")
             if n > 100:
-                return ExecutionResult(
-                    success=False,
-                    error="العدد كبير جداً لحساب المضروب"
-                )
+                return ExecutionResult(success=False, error="العدد كبير جداً", model="factorial")
             
             result = math.factorial(n)
+            steps = [
+                Step("📥", "السؤال", f"{n}!"),
+                Step("🔍", "التحليل", f"حساب مضروب العدد {n}"),
+                Step("🧮", "الحساب", f"{n}! = {result}"),
+                Step("✅", "النتيجة", str(result))
+            ]
             
             self._increment_count()
             self._log_operation("factorial", {"n": n}, result)
@@ -201,19 +270,23 @@ class MathEngine:
                 success=True,
                 result=result,
                 result_str=str(result),
-                steps=[Step("! مضروب", f"{n}! = {result}")]
+                steps=steps,
+                model="factorial"
             )
         except Exception as e:
-            logger.error(f"Error in factorial: {e}")
-            return ExecutionResult(
-                success=False,
-                error=f"خطأ في حساب المضروب: {str(e)}"
-            )
+            return ExecutionResult(success=False, error=str(e), model="factorial")
     
-    def percent(self, value: float, total: float) -> ExecutionResult:
+    async def percent(self, value: float, total: float) -> ExecutionResult:
         """قالب 5: نسبة مئوية"""
         try:
             result = (value / 100) * total
+            steps = [
+                Step("📥", "السؤال", f"{value}% من {total}"),
+                Step("🔍", "التحليل", "حساب النسبة المئوية"),
+                Step("🧮", "الحساب", f"({value}/100) × {total} = {result}"),
+                Step("✅", "النتيجة", str(result))
+            ]
+            
             self._increment_count()
             self._log_operation("percent", {"value": value, "total": total}, result)
             
@@ -221,16 +294,23 @@ class MathEngine:
                 success=True,
                 result=result,
                 result_str=str(result),
-                steps=[Step("📊 نسبة مئوية", f"{value}% من {total} = {result}")]
+                steps=steps,
+                model="percent"
             )
         except Exception as e:
-            logger.error(f"Error in percent: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="percent")
     
-    def absolute(self, value: float) -> ExecutionResult:
+    async def absolute(self, value: float) -> ExecutionResult:
         """قالب 6: قيمة مطلقة"""
         try:
             result = abs(value)
+            steps = [
+                Step("📥", "السؤال", f"|{value}|"),
+                Step("🔍", "التحليل", "حساب القيمة المطلقة"),
+                Step("🧮", "الحساب", f"|{value}| = {result}"),
+                Step("✅", "النتيجة", str(result))
+            ]
+            
             self._increment_count()
             self._log_operation("absolute", {"value": value}, result)
             
@@ -238,16 +318,23 @@ class MathEngine:
                 success=True,
                 result=result,
                 result_str=str(result),
-                steps=[Step("📏 قيمة مطلقة", f"|{value}| = {result}")]
+                steps=steps,
+                model="absolute"
             )
         except Exception as e:
-            logger.error(f"Error in absolute: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="absolute")
     
-    def gcd(self, a: int, b: int) -> ExecutionResult:
+    async def gcd(self, a: int, b: int) -> ExecutionResult:
         """قالب 7: القاسم المشترك الأكبر"""
         try:
             result = math.gcd(a, b)
+            steps = [
+                Step("📥", "السؤال", f"GCD({a}, {b})"),
+                Step("🔍", "التحليل", f"إيجاد القاسم المشترك الأكبر لـ {a} و {b}"),
+                Step("🧮", "الحساب", f"GCD({a}, {b}) = {result}"),
+                Step("✅", "النتيجة", str(result))
+            ]
+            
             self._increment_count()
             self._log_operation("gcd", {"a": a, "b": b}, result)
             
@@ -255,16 +342,23 @@ class MathEngine:
                 success=True,
                 result=result,
                 result_str=str(result),
-                steps=[Step("🔢 القاسم المشترك الأكبر", f"GCD({a}, {b}) = {result}")]
+                steps=steps,
+                model="gcd"
             )
         except Exception as e:
-            logger.error(f"Error in gcd: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="gcd")
     
-    def lcm(self, a: int, b: int) -> ExecutionResult:
+    async def lcm(self, a: int, b: int) -> ExecutionResult:
         """قالب 8: المضاعف المشترك الأصغر"""
         try:
             result = abs(a * b) // math.gcd(a, b) if a and b else 0
+            steps = [
+                Step("📥", "السؤال", f"LCM({a}, {b})"),
+                Step("🔍", "التحليل", f"إيجاد المضاعف المشترك الأصغر لـ {a} و {b}"),
+                Step("🧮", "الحساب", f"LCM({a}, {b}) = {result}"),
+                Step("✅", "النتيجة", str(result))
+            ]
+            
             self._increment_count()
             self._log_operation("lcm", {"a": a, "b": b}, result)
             
@@ -272,22 +366,26 @@ class MathEngine:
                 success=True,
                 result=result,
                 result_str=str(result),
-                steps=[Step("📐 المضاعف المشترك الأصغر", f"LCM({a}, {b}) = {result}")]
+                steps=steps,
+                model="lcm"
             )
         except Exception as e:
-            logger.error(f"Error in lcm: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="lcm")
     
-    def log10(self, num: float) -> ExecutionResult:
+    async def log10(self, num: float) -> ExecutionResult:
         """قالب 9: لوغاريتم عشري"""
         try:
             if num <= 0:
-                return ExecutionResult(
-                    success=False,
-                    error="لا يمكن حساب لوغاريتم لعدد سالب أو صفر"
-                )
+                return ExecutionResult(success=False, error="لا يمكن حساب لوغاريتم لعدد سالب أو صفر", model="log10")
             
             result = math.log10(num)
+            steps = [
+                Step("📥", "السؤال", f"log₁₀({num})"),
+                Step("🔍", "التحليل", f"حساب اللوغاريتم العشري لـ {num}"),
+                Step("🧮", "الحساب", f"log₁₀({num}) = {result:.6f}"),
+                Step("✅", "النتيجة", str(result))
+            ]
+            
             self._increment_count()
             self._log_operation("log10", {"num": num}, result)
             
@@ -295,22 +393,26 @@ class MathEngine:
                 success=True,
                 result=result,
                 result_str=str(result),
-                steps=[Step("📊 لوغاريتم عشري", f"log₁₀({num}) = {result}")]
+                steps=steps,
+                model="log10"
             )
         except Exception as e:
-            logger.error(f"Error in log10: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="log10")
     
-    def ln(self, num: float) -> ExecutionResult:
+    async def ln(self, num: float) -> ExecutionResult:
         """قالب 10: لوغاريتم طبيعي"""
         try:
             if num <= 0:
-                return ExecutionResult(
-                    success=False,
-                    error="لا يمكن حساب لوغاريتم لعدد سالب أو صفر"
-                )
+                return ExecutionResult(success=False, error="لا يمكن حساب لوغاريتم لعدد سالب أو صفر", model="ln")
             
             result = math.log(num)
+            steps = [
+                Step("📥", "السؤال", f"ln({num})"),
+                Step("🔍", "التحليل", f"حساب اللوغاريتم الطبيعي لـ {num}"),
+                Step("🧮", "الحساب", f"ln({num}) = {result:.6f}"),
+                Step("✅", "النتيجة", str(result))
+            ]
+            
             self._increment_count()
             self._log_operation("ln", {"num": num}, result)
             
@@ -318,32 +420,47 @@ class MathEngine:
                 success=True,
                 result=result,
                 result_str=str(result),
-                steps=[Step("📈 لوغاريتم طبيعي", f"ln({num}) = {result}")]
+                steps=steps,
+                model="ln"
             )
         except Exception as e:
-            logger.error(f"Error in ln: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="ln")
     
     # ========== معادلات (10 قوالب) ==========
     
-    def solve_linear(self, a: float, b: float) -> ExecutionResult:
+    async def solve_linear(self, a: float, b: float) -> ExecutionResult:
         """قالب 11: حل معادلة خطية: ax + b = 0"""
         try:
+            steps = [
+                Step("📥", "السؤال", f"حل المعادلة: {a}x + {b} = 0"),
+                Step("🔍", "التحليل", f"معادلة خطية من الدرجة الأولى")
+            ]
+            
             if a == 0:
                 if b == 0:
+                    steps.append(Step("✅", "النتيجة", "جميع الأعداد حلول"))
                     return ExecutionResult(
                         success=True,
                         result="جميع الأعداد حلول",
                         result_str="جميع الأعداد حلول",
-                        steps=[Step("📐 معادلة خطية", "0 = 0: جميع الأعداد حلول")]
+                        steps=steps,
+                        model="solve_linear"
                     )
                 else:
                     return ExecutionResult(
                         success=False,
-                        error="معادلة غير قابلة للحل (0 = قيمة غير صفرية)"
+                        error="معادلة غير قابلة للحل",
+                        steps=steps,
+                        model="solve_linear"
                     )
             
             x = -b / a
+            steps.extend([
+                Step("📝", "القانون", f"x = -b / a = -({b}) / {a}"),
+                Step("🧮", "الحساب", f"x = {x}"),
+                Step("✅", "النتيجة", f"x = {x}")
+            ])
+            
             self._increment_count()
             self._log_operation("solve_linear", {"a": a, "b": b}, x)
             
@@ -351,85 +468,76 @@ class MathEngine:
                 success=True,
                 result=x,
                 result_str=f"x = {x}",
-                steps=[
-                    Step("📐 معادلة خطية", f"{a}x + {b} = 0"),
-                    Step("✏️ حل", f"x = -{b} / {a} = {x}")
-                ]
+                steps=steps,
+                model="solve_linear"
             )
         except Exception as e:
-            logger.error(f"Error in solve_linear: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="solve_linear")
     
-    def solve_quadratic(self, a: float, b: float, c: float) -> ExecutionResult:
+    async def solve_quadratic(self, a: float, b: float, c: float) -> ExecutionResult:
         """قالب 12: حل معادلة تربيعية: ax² + bx + c = 0"""
         try:
+            steps = [
+                Step("📥", "السؤال", f"حل المعادلة: {a}x² + {b}x + {c} = 0"),
+                Step("🔍", "التحليل", f"معادلة تربيعية")
+            ]
+            
             if a == 0:
-                return self.solve_linear(b, c)
+                return await self.solve_linear(b, c)
             
             discriminant = b**2 - 4*a*c
-            sqrt_d = abs(discriminant) ** 0.5
+            steps.append(Step("📝", "المميز", f"Δ = b² - 4ac = {b}² - 4({a})({c}) = {discriminant}"))
             
-            steps = [
-                Step("📐 معادلة تربيعية", f"{a}x² + {b}x + {c} = 0"),
-                Step("🔍 حساب المميز", f"Δ = b² - 4ac = {b}² - 4({a})({c}) = {discriminant}")
-            ]
+            sqrt_d = abs(discriminant) ** 0.5
             
             if discriminant > 0:
                 x1 = (-b + sqrt_d) / (2*a)
                 x2 = (-b - sqrt_d) / (2*a)
-                result_str = f"x₁ = {x1}, x₂ = {x2}"
-                steps.append(Step("✅ حلان حقيقيان", f"x₁ = {x1}, x₂ = {x2}"))
-                
-                self._log_operation("solve_quadratic", {"a": a, "b": b, "c": c}, (x1, x2))
-                return ExecutionResult(
-                    success=True,
-                    result=(x1, x2),
-                    result_str=result_str,
-                    steps=steps
-                )
+                steps.append(Step("🧮", "الحلان", f"x₁ = {x1}, x₂ = {x2}"))
+                steps.append(Step("✅", "النتيجة", f"x₁ = {x1}, x₂ = {x2}"))
+                result = (x1, x2)
             elif discriminant == 0:
                 x = -b / (2*a)
-                result_str = f"x = {x} (حل مكرر)"
-                steps.append(Step("🔁 حل مكرر", f"x = {x}"))
-                
-                self._log_operation("solve_quadratic", {"a": a, "b": b, "c": c}, x)
-                return ExecutionResult(
-                    success=True,
-                    result=x,
-                    result_str=result_str,
-                    steps=steps
-                )
+                steps.append(Step("🧮", "الحل", f"x = {x} (حل مكرر)"))
+                steps.append(Step("✅", "النتيجة", f"x = {x}"))
+                result = x
             else:
                 real = -b / (2*a)
                 imag = sqrt_d / (2*a)
-                result_str = f"x₁ = {real} + {imag}i, x₂ = {real} - {imag}i"
-                steps.append(Step("🔮 حلان مركبان", result_str))
-                
-                self._log_operation("solve_quadratic", {"a": a, "b": b, "c": c}, (complex(real, imag), complex(real, -imag)))
-                return ExecutionResult(
-                    success=True,
-                    result=(complex(real, imag), complex(real, -imag)),
-                    result_str=result_str,
-                    steps=steps
-                )
+                steps.append(Step("🧮", "الحلان", f"x₁ = {real} + {imag}i, x₂ = {real} - {imag}i"))
+                steps.append(Step("✅", "النتيجة", f"x₁ = {real} + {imag}i, x₂ = {real} - {imag}i"))
+                result = (complex(real, imag), complex(real, -imag))
+            
+            self._increment_count()
+            self._log_operation("solve_quadratic", {"a": a, "b": b, "c": c}, result)
+            
+            return ExecutionResult(
+                success=True,
+                result=result,
+                result_str=str(result),
+                steps=steps,
+                model="solve_quadratic"
+            )
         except Exception as e:
-            logger.error(f"Error in solve_quadratic: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="solve_quadratic")
     
-    def solve_cubic(self, a: float, b: float, c: float, d: float) -> ExecutionResult:
+    async def solve_cubic(self, a: float, b: float, c: float, d: float) -> ExecutionResult:
         """قالب 13: حل معادلة تكعيبية: ax³ + bx² + cx + d = 0"""
         try:
+            steps = [
+                Step("📥", "السؤال", f"حل المعادلة: {a}x³ + {b}x² + {c}x + {d} = 0"),
+                Step("🔍", "التحليل", f"معادلة تكعيبية")
+            ]
+            
             if a == 0:
-                return self.solve_quadratic(b, c, d)
+                return await self.solve_quadratic(b, c, d)
             
             x = sp.Symbol('x')
             expr = a*x**3 + b*x**2 + c*x + d
             solutions = sp.solve(expr, x)
             
-            steps = [
-                Step("📐 معادلة تكعيبية", f"{a}x³ + {b}x² + {c}x + {d} = 0"),
-                Step("🔍 الحلول", f"x = {[str(s) for s in solutions]}")
-            ]
+            steps.append(Step("🧮", "الحلول", f"x = {[str(s) for s in solutions]}"))
+            steps.append(Step("✅", "النتيجة", str([str(s) for s in solutions])))
             
             self._increment_count()
             self._log_operation("solve_cubic", {"a": a, "b": b, "c": c, "d": d}, solutions)
@@ -438,40 +546,46 @@ class MathEngine:
                 success=True,
                 result=solutions,
                 result_str=str([str(s) for s in solutions]),
-                steps=steps
+                steps=steps,
+                model="solve_cubic"
             )
         except Exception as e:
-            logger.error(f"Error in solve_cubic: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="solve_cubic")
     
-    def solve_system_2x2(self, a1: float, b1: float, c1: float, a2: float, b2: float, c2: float) -> ExecutionResult:
+    async def solve_system_2x2(self, a1: float, b1: float, c1: float, a2: float, b2: float, c2: float) -> ExecutionResult:
         """قالب 14: حل نظام معادلتين خطيتين"""
         try:
+            steps = [
+                Step("📥", "السؤال", f"حل النظام:\n{a1}x + {b1}y = {c1}\n{a2}x + {b2}y = {c2}"),
+                Step("🔍", "التحليل", f"نظام معادلتين خطيتين")
+            ]
+            
             det = a1*b2 - a2*b1
+            steps.append(Step("📝", "المحدد الرئيسي", f"Δ = {a1}×{b2} - {a2}×{b1} = {det}"))
             
             if det == 0:
                 if a1*c2 == a2*c1 and b1*c2 == b2*c1:
+                    steps.append(Step("✅", "النتيجة", "عدد لا نهائي من الحلول"))
                     return ExecutionResult(
                         success=True,
                         result="عدد لا نهائي من الحلول",
                         result_str="عدد لا نهائي من الحلول",
-                        steps=[Step("📐 نظام معادلات", "المعادلتان متطابقتان")]
+                        steps=steps,
+                        model="solve_system_2x2"
                     )
                 else:
                     return ExecutionResult(
                         success=False,
-                        error="النظام غير متوافق (لا يوجد حل)"
+                        error="النظام غير متوافق",
+                        steps=steps,
+                        model="solve_system_2x2"
                     )
             
             x = (c1*b2 - c2*b1) / det
             y = (a1*c2 - a2*c1) / det
             
-            steps = [
-                Step("📐 نظام معادلتين", f"{a1}x + {b1}y = {c1}"),
-                Step("", f"{a2}x + {b2}y = {c2}"),
-                Step("🔍 حساب المحدد الرئيسي", f"Δ = {a1}*{b2} - {a2}*{b1} = {det}"),
-                Step("✅ الحل", f"x = {x}, y = {y}")
-            ]
+            steps.append(Step("🧮", "الحل", f"x = {x}, y = {y}"))
+            steps.append(Step("✅", "النتيجة", f"x = {x}, y = {y}"))
             
             self._increment_count()
             self._log_operation("solve_system_2x2", {"a1": a1, "b1": b1, "c1": c1, "a2": a2, "b2": b2, "c2": c2}, (x, y))
@@ -480,47 +594,62 @@ class MathEngine:
                 success=True,
                 result=(x, y),
                 result_str=f"x = {x}, y = {y}",
-                steps=steps
+                steps=steps,
+                model="solve_system_2x2"
             )
         except Exception as e:
-            logger.error(f"Error in solve_system_2x2: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="solve_system_2x2")
     
     # ========== مشتقات (10 قوالب) ==========
     
-    def derivative(self, expr: sp.Expr, var: sp.Symbol = None) -> ExecutionResult:
-        """قالب مشتقة عام"""
+    async def derivative(self, expression: str, variable: str = 'x') -> ExecutionResult:
+        """قالب 15: مشتقة عامة - تستقبل نص"""
         try:
-            if var is None:
-                var = self.x
+            expr = safe_sympify(expression)
+            if expr is None:
+                return ExecutionResult(success=False, error="تعبير غير صالح", model="derivative")
+            
+            var = ALLOWED_SYMBOLS.get(variable, sp.Symbol(variable))
+            
+            steps = [
+                Step("📥", "السؤال", f"إيجاد مشتقة: {expression}"),
+                Step("🔍", "التحليل", f"الاشتقاق بالنسبة للمتغير {variable}")
+            ]
             
             result = sp.diff(expr, var)
             simplified = sp.simplify(result)
             
-            steps = [
-                Step("📐 مشتقة", f"d/d{var} ({expr})"),
-                Step("✅ النتيجة", f"= {sp.latex(simplified)}")
-            ]
+            steps.append(Step("🧮", "الحساب", f"d/d{variable} ({expression}) = {simplified}", sp.latex(simplified)))
+            steps.append(Step("✅", "النتيجة", str(simplified)))
             
             self._increment_count()
-            self._log_operation("derivative", {"expr": str(expr), "var": str(var)}, simplified)
+            self._log_operation("derivative", {"expression": expression, "variable": variable}, simplified)
             
             return ExecutionResult(
                 success=True,
                 result=simplified,
-                result_str=sp.latex(simplified),
-                steps=steps
+                result_str=str(simplified),
+                steps=steps,
+                model="derivative"
             )
         except Exception as e:
-            logger.error(f"Error in derivative: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="derivative")
     
-    def derivative_power(self, n: float) -> ExecutionResult:
+    async def derivative_power(self, n: float) -> ExecutionResult:
         """قالب 16: مشتقة x^n"""
         try:
+            steps = [
+                Step("📥", "السؤال", f"مشتقة x^{n}"),
+                Step("🔍", "التحليل", "تطبيق قاعدة مشتقة القوى")
+            ]
+            
             expr = self.x ** n
             result = sp.diff(expr, self.x)
             simplified = sp.simplify(result)
+            
+            steps.append(Step("📝", "القاعدة", "d/dx (x^n) = n·x^(n-1)"))
+            steps.append(Step("🧮", "التطبيق", f"d/dx (x^{n}) = {n}·x^{{{n-1}}} = {simplified}", sp.latex(simplified)))
+            steps.append(Step("✅", "النتيجة", str(simplified)))
             
             self._increment_count()
             self._log_operation("derivative_power", {"n": n}, simplified)
@@ -528,197 +657,278 @@ class MathEngine:
             return ExecutionResult(
                 success=True,
                 result=simplified,
-                result_str=sp.latex(simplified),
-                steps=[Step("📐 مشتقة قوة", f"d/dx (x^{{{n}}}) = {sp.latex(simplified)}")]
+                result_str=str(simplified),
+                steps=steps,
+                model="derivative_power"
             )
         except Exception as e:
-            logger.error(f"Error in derivative_power: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="derivative_power")
     
-    def derivative_sin(self) -> ExecutionResult:
+    async def derivative_sin(self, variable: str = 'x') -> ExecutionResult:
         """قالب 17: مشتقة sin(x)"""
-        expr = sp.sin(self.x)
-        result = sp.diff(expr, self.x)
+        steps = [
+            Step("📥", "السؤال", f"مشتقة sin({variable})"),
+            Step("🔍", "التحليل", "تطبيق قاعدة مشتقة الجيب"),
+            Step("📝", "القاعدة", "d/dx sin(x) = cos(x)"),
+            Step("🧮", "الحساب", f"d/d{variable} sin({variable}) = cos({variable})"),
+            Step("✅", "النتيجة", f"cos({variable})")
+        ]
         
         self._increment_count()
-        self._log_operation("derivative_sin", {}, result)
+        self._log_operation("derivative_sin", {}, "cos")
         
         return ExecutionResult(
             success=True,
-            result=result,
-            result_str=sp.latex(result),
-            steps=[Step("📐 مشتقة جيب", f"d/dx sin(x) = {sp.latex(result)}")]
+            result=f"cos({variable})",
+            result_str=f"cos({variable})",
+            steps=steps,
+            model="derivative_sin"
         )
     
-    def derivative_cos(self) -> ExecutionResult:
+    async def derivative_cos(self, variable: str = 'x') -> ExecutionResult:
         """قالب 18: مشتقة cos(x)"""
-        expr = sp.cos(self.x)
-        result = sp.diff(expr, self.x)
+        steps = [
+            Step("📥", "السؤال", f"مشتقة cos({variable})"),
+            Step("🔍", "التحليل", "تطبيق قاعدة مشتقة جيب التمام"),
+            Step("📝", "القاعدة", "d/dx cos(x) = -sin(x)"),
+            Step("🧮", "الحساب", f"d/d{variable} cos({variable}) = -sin({variable})"),
+            Step("✅", "النتيجة", f"-sin({variable})")
+        ]
         
         self._increment_count()
-        self._log_operation("derivative_cos", {}, result)
+        self._log_operation("derivative_cos", {}, "-sin")
         
         return ExecutionResult(
             success=True,
-            result=result,
-            result_str=sp.latex(result),
-            steps=[Step("📐 مشتقة جيب تمام", f"d/dx cos(x) = {sp.latex(result)}")]
+            result=f"-sin({variable})",
+            result_str=f"-sin({variable})",
+            steps=steps,
+            model="derivative_cos"
         )
     
-    def derivative_tan(self) -> ExecutionResult:
+    async def derivative_tan(self, variable: str = 'x') -> ExecutionResult:
         """قالب 19: مشتقة tan(x)"""
-        expr = sp.tan(self.x)
-        result = sp.diff(expr, self.x)
+        steps = [
+            Step("📥", "السؤال", f"مشتقة tan({variable})"),
+            Step("🔍", "التحليل", "تطبيق قاعدة مشتقة الظل"),
+            Step("📝", "القاعدة", "d/dx tan(x) = sec²(x)"),
+            Step("🧮", "الحساب", f"d/d{variable} tan({variable}) = sec²({variable})"),
+            Step("✅", "النتيجة", f"sec²({variable})")
+        ]
         
         self._increment_count()
-        self._log_operation("derivative_tan", {}, result)
+        self._log_operation("derivative_tan", {}, "sec^2")
         
         return ExecutionResult(
             success=True,
-            result=result,
-            result_str=sp.latex(result),
-            steps=[Step("📐 مشتقة ظل", f"d/dx tan(x) = {sp.latex(result)}")]
+            result=f"sec²({variable})",
+            result_str=f"sec²({variable})",
+            steps=steps,
+            model="derivative_tan"
         )
     
-    def derivative_exp(self) -> ExecutionResult:
+    async def derivative_exp(self, variable: str = 'x') -> ExecutionResult:
         """قالب 20: مشتقة e^x"""
-        expr = sp.exp(self.x)
-        result = sp.diff(expr, self.x)
+        steps = [
+            Step("📥", "السؤال", f"مشتقة e^{{{variable}}}"),
+            Step("🔍", "التحليل", "تطبيق قاعدة مشتقة الدالة الأسية"),
+            Step("📝", "القاعدة", "d/dx e^x = e^x"),
+            Step("🧮", "الحساب", f"d/d{variable} e^{{{variable}}} = e^{{{variable}}}"),
+            Step("✅", "النتيجة", f"e^{{{variable}}}")
+        ]
         
         self._increment_count()
-        self._log_operation("derivative_exp", {}, result)
+        self._log_operation("derivative_exp", {}, "exp")
         
         return ExecutionResult(
             success=True,
-            result=result,
-            result_str=sp.latex(result),
-            steps=[Step("📐 مشتقة أسية", f"d/dx e^x = {sp.latex(result)}")]
+            result=f"e^{{{variable}}}",
+            result_str=f"e^{variable}",
+            steps=steps,
+            model="derivative_exp"
         )
     
-    def derivative_ln(self) -> ExecutionResult:
+    async def derivative_ln(self, variable: str = 'x') -> ExecutionResult:
         """قالب 21: مشتقة ln(x)"""
-        expr = sp.log(self.x)
-        result = sp.diff(expr, self.x)
+        steps = [
+            Step("📥", "السؤال", f"مشتقة ln({variable})"),
+            Step("🔍", "التحليل", "تطبيق قاعدة مشتقة اللوغاريتم الطبيعي"),
+            Step("📝", "القاعدة", "d/dx ln(x) = 1/x"),
+            Step("🧮", "الحساب", f"d/d{variable} ln({variable}) = 1/{variable}"),
+            Step("✅", "النتيجة", f"1/{variable}")
+        ]
         
         self._increment_count()
-        self._log_operation("derivative_ln", {}, result)
+        self._log_operation("derivative_ln", {}, "1/x")
         
         return ExecutionResult(
             success=True,
-            result=result,
-            result_str=sp.latex(result),
-            steps=[Step("📐 مشتقة لوغاريتم", f"d/dx ln(x) = {sp.latex(result)}")]
+            result=f"1/{variable}",
+            result_str=f"1/{variable}",
+            steps=steps,
+            model="derivative_ln"
         )
     
-    def derivative_product(self, u: sp.Expr, v: sp.Expr) -> ExecutionResult:
+    async def derivative_product(self, u: str, v: str, variable: str = 'x') -> ExecutionResult:
         """قالب 22: مشتقة حاصل ضرب دالتين"""
         try:
-            result = sp.diff(u * v, self.x)
-            simplified = sp.simplify(result)
+            u_expr = safe_sympify(u)
+            v_expr = safe_sympify(v)
+            if u_expr is None or v_expr is None:
+                return ExecutionResult(success=False, error="تعبير غير صالح", model="derivative_product")
+            
+            var = ALLOWED_SYMBOLS.get(variable, sp.Symbol(variable))
             
             steps = [
-                Step("📐 قاعدة الضرب", f"d/dx [{u} × {v}]"),
-                Step("✅ النتيجة", f"= {sp.latex(simplified)}")
+                Step("📥", "السؤال", f"مشتقة {u} × {v}"),
+                Step("🔍", "التحليل", "تطبيق قاعدة ضرب الدوال"),
+                Step("📝", "القاعدة", "d/dx [u·v] = u'·v + u·v'")
             ]
             
+            result = sp.diff(u_expr * v_expr, var)
+            simplified = sp.simplify(result)
+            
+            steps.append(Step("🧮", "الحساب", f"= {simplified}", sp.latex(simplified)))
+            steps.append(Step("✅", "النتيجة", str(simplified)))
+            
             self._increment_count()
-            self._log_operation("derivative_product", {"u": str(u), "v": str(v)}, simplified)
+            self._log_operation("derivative_product", {"u": u, "v": v}, simplified)
             
             return ExecutionResult(
                 success=True,
                 result=simplified,
-                result_str=sp.latex(simplified),
-                steps=steps
+                result_str=str(simplified),
+                steps=steps,
+                model="derivative_product"
             )
         except Exception as e:
-            logger.error(f"Error in derivative_product: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="derivative_product")
     
-    def derivative_quotient(self, u: sp.Expr, v: sp.Expr) -> ExecutionResult:
+    async def derivative_quotient(self, u: str, v: str, variable: str = 'x') -> ExecutionResult:
         """قالب 23: مشتقة حاصل قسمة دالتين"""
         try:
-            result = sp.diff(u / v, self.x)
-            simplified = sp.simplify(result)
+            u_expr = safe_sympify(u)
+            v_expr = safe_sympify(v)
+            if u_expr is None or v_expr is None:
+                return ExecutionResult(success=False, error="تعبير غير صالح", model="derivative_quotient")
+            
+            var = ALLOWED_SYMBOLS.get(variable, sp.Symbol(variable))
             
             steps = [
-                Step("📐 قاعدة القسمة", f"d/dx [{u} / {v}]"),
-                Step("✅ النتيجة", f"= {sp.latex(simplified)}")
+                Step("📥", "السؤال", f"مشتقة {u} / {v}"),
+                Step("🔍", "التحليل", "تطبيق قاعدة قسمة الدوال"),
+                Step("📝", "القاعدة", "d/dx [u/v] = (u'·v - u·v') / v²")
             ]
             
+            result = sp.diff(u_expr / v_expr, var)
+            simplified = sp.simplify(result)
+            
+            steps.append(Step("🧮", "الحساب", f"= {simplified}", sp.latex(simplified)))
+            steps.append(Step("✅", "النتيجة", str(simplified)))
+            
             self._increment_count()
-            self._log_operation("derivative_quotient", {"u": str(u), "v": str(v)}, simplified)
+            self._log_operation("derivative_quotient", {"u": u, "v": v}, simplified)
             
             return ExecutionResult(
                 success=True,
                 result=simplified,
-                result_str=sp.latex(simplified),
-                steps=steps
+                result_str=str(simplified),
+                steps=steps,
+                model="derivative_quotient"
             )
         except Exception as e:
-            logger.error(f"Error in derivative_quotient: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="derivative_quotient")
     
-    def derivative_chain(self, outer: sp.Expr, inner: sp.Expr, var: sp.Symbol = None) -> ExecutionResult:
+    async def derivative_chain(self, outer: str, inner: str, variable: str = 'x') -> ExecutionResult:
         """قالب 24: مشتقة قاعدة السلسلة"""
         try:
-            if var is None:
-                var = self.x
+            outer_expr = safe_sympify(outer)
+            inner_expr = safe_sympify(inner)
+            if outer_expr is None or inner_expr is None:
+                return ExecutionResult(success=False, error="تعبير غير صالح", model="derivative_chain")
             
-            composed = outer.subs(var, inner)
+            var = ALLOWED_SYMBOLS.get(variable, sp.Symbol(variable))
+            
+            steps = [
+                Step("📥", "السؤال", f"مشتقة {outer}({inner})"),
+                Step("🔍", "التحليل", "تطبيق قاعدة السلسلة"),
+                Step("📝", "القاعدة", "d/dx f(g(x)) = f'(g(x)) · g'(x)")
+            ]
+            
+            composed = outer_expr.subs(var, inner_expr)
             result = sp.diff(composed, var)
             simplified = sp.simplify(result)
             
-            steps = [
-                Step("📐 قاعدة السلسلة", f"d/d{var} {outer}({inner})"),
-                Step("✅ النتيجة", f"= {sp.latex(simplified)}")
-            ]
+            steps.append(Step("🧮", "الحساب", f"= {simplified}", sp.latex(simplified)))
+            steps.append(Step("✅", "النتيجة", str(simplified)))
             
             self._increment_count()
-            self._log_operation("derivative_chain", {"outer": str(outer), "inner": str(inner), "var": str(var)}, simplified)
+            self._log_operation("derivative_chain", {"outer": outer, "inner": inner}, simplified)
             
             return ExecutionResult(
                 success=True,
                 result=simplified,
-                result_str=sp.latex(simplified),
-                steps=steps
+                result_str=str(simplified),
+                steps=steps,
+                model="derivative_chain"
             )
         except Exception as e:
-            logger.error(f"Error in derivative_chain: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="derivative_chain")
     
     # ========== تكاملات (10 قوالب) ==========
     
-    def integral(self, expr: sp.Expr, var: sp.Symbol = None) -> ExecutionResult:
-        """قالب تكامل عام"""
+    async def integral(self, expression: str, variable: str = 'x') -> ExecutionResult:
+        """قالب 25: تكامل عام - تستقبل نص"""
         try:
-            if var is None:
-                var = self.x
+            expr = safe_sympify(expression)
+            if expr is None:
+                return ExecutionResult(success=False, error="تعبير غير صالح", model="integral")
+            
+            var = ALLOWED_SYMBOLS.get(variable, sp.Symbol(variable))
+            
+            steps = [
+                Step("📥", "السؤال", f"∫ {expression} d{variable}"),
+                Step("🔍", "التحليل", f"إيجاد التكامل غير المحدد للدالة")
+            ]
             
             result = sp.integrate(expr, var)
             
-            steps = [
-                Step("📦 تكامل", f"∫ {expr} d{var}"),
-                Step("✅ النتيجة", f"= {sp.latex(result)} + C")
-            ]
+            steps.append(Step("🧮", "الحساب", f"∫ {expression} d{variable} = {result} + C", sp.latex(result)))
+            steps.append(Step("✅", "النتيجة", f"{result} + C"))
+            steps.append(Step("ℹ️", "ملاحظة", "C هو ثابت التكامل"))
             
             self._increment_count()
-            self._log_operation("integral", {"expr": str(expr), "var": str(var)}, result)
+            self._log_operation("integral", {"expression": expression}, result)
             
             return ExecutionResult(
                 success=True,
-                result=result,
-                result_str=sp.latex(result) + " + C",
-                steps=steps
+                result=f"{result} + C",
+                result_str=f"{result} + C",
+                steps=steps,
+                model="integral"
             )
         except Exception as e:
-            logger.error(f"Error in integral: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="integral")
     
-    def integral_power(self, n: float) -> ExecutionResult:
+    async def integral_power(self, n: float, variable: str = 'x') -> ExecutionResult:
         """قالب 26: تكامل x^n"""
         try:
-            expr = self.x ** n
-            result = sp.integrate(expr, self.x)
+            steps = [
+                Step("📥", "السؤال", f"∫ {variable}^{n} d{variable}"),
+                Step("🔍", "التحليل", "تطبيق قاعدة تكامل القوى")
+            ]
+            
+            if n == -1:
+                steps.append(Step("📝", "القاعدة", "∫ x⁻¹ dx = ln|x| + C"))
+                steps.append(Step("🧮", "الحساب", f"∫ {variable}^{n} d{variable} = ln|{variable}| + C"))
+                steps.append(Step("✅", "النتيجة", f"ln|{variable}| + C"))
+                result = f"ln|{variable}| + C"
+            else:
+                steps.append(Step("📝", "القاعدة", "∫ x^n dx = x^(n+1)/(n+1) + C"))
+                result_expr = sp.integrate(self.x ** n, self.x)
+                steps.append(Step("🧮", "الحساب", f"∫ {variable}^{n} d{variable} = {result_expr} + C", sp.latex(result_expr)))
+                steps.append(Step("✅", "النتيجة", f"{result_expr} + C"))
+                result = f"{result_expr} + C"
             
             self._increment_count()
             self._log_operation("integral_power", {"n": n}, result)
@@ -726,178 +936,230 @@ class MathEngine:
             return ExecutionResult(
                 success=True,
                 result=result,
-                result_str=sp.latex(result) + " + C",
-                steps=[Step("∫ تكامل قوة", f"∫ x^{{{n}}} dx = {sp.latex(result)} + C")]
+                result_str=result,
+                steps=steps,
+                model="integral_power"
             )
         except Exception as e:
-            logger.error(f"Error in integral_power: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="integral_power")
     
-    def integral_sin(self) -> ExecutionResult:
+    async def integral_sin(self, variable: str = 'x') -> ExecutionResult:
         """قالب 27: تكامل sin(x)"""
-        expr = sp.sin(self.x)
-        result = sp.integrate(expr, self.x)
+        steps = [
+            Step("📥", "السؤال", f"∫ sin({variable}) d{variable}"),
+            Step("🔍", "التحليل", "تطبيق قاعدة تكامل الجيب"),
+            Step("📝", "القاعدة", "∫ sin(x) dx = -cos(x) + C"),
+            Step("🧮", "الحساب", f"∫ sin({variable}) d{variable} = -cos({variable}) + C"),
+            Step("✅", "النتيجة", f"-cos({variable}) + C")
+        ]
         
         self._increment_count()
-        self._log_operation("integral_sin", {}, result)
+        self._log_operation("integral_sin", {}, "-cos + C")
         
         return ExecutionResult(
             success=True,
-            result=result,
-            result_str=sp.latex(result) + " + C",
-            steps=[Step("∫ تكامل جيب", f"∫ sin(x) dx = {sp.latex(result)} + C")]
+            result=f"-cos({variable}) + C",
+            result_str=f"-cos({variable}) + C",
+            steps=steps,
+            model="integral_sin"
         )
     
-    def integral_cos(self) -> ExecutionResult:
+    async def integral_cos(self, variable: str = 'x') -> ExecutionResult:
         """قالب 28: تكامل cos(x)"""
-        expr = sp.cos(self.x)
-        result = sp.integrate(expr, self.x)
+        steps = [
+            Step("📥", "السؤال", f"∫ cos({variable}) d{variable}"),
+            Step("🔍", "التحليل", "تطبيق قاعدة تكامل جيب التمام"),
+            Step("📝", "القاعدة", "∫ cos(x) dx = sin(x) + C"),
+            Step("🧮", "الحساب", f"∫ cos({variable}) d{variable} = sin({variable}) + C"),
+            Step("✅", "النتيجة", f"sin({variable}) + C")
+        ]
         
         self._increment_count()
-        self._log_operation("integral_cos", {}, result)
+        self._log_operation("integral_cos", {}, "sin + C")
         
         return ExecutionResult(
             success=True,
-            result=result,
-            result_str=sp.latex(result) + " + C",
-            steps=[Step("∫ تكامل جيب تمام", f"∫ cos(x) dx = {sp.latex(result)} + C")]
+            result=f"sin({variable}) + C",
+            result_str=f"sin({variable}) + C",
+            steps=steps,
+            model="integral_cos"
         )
     
-    def integral_exp(self) -> ExecutionResult:
+    async def integral_exp(self, variable: str = 'x') -> ExecutionResult:
         """قالب 29: تكامل e^x"""
-        expr = sp.exp(self.x)
-        result = sp.integrate(expr, self.x)
+        steps = [
+            Step("📥", "السؤال", f"∫ e^{{{variable}}} d{variable}"),
+            Step("🔍", "التحليل", "تطبيق قاعدة تكامل الدالة الأسية"),
+            Step("📝", "القاعدة", "∫ e^x dx = e^x + C"),
+            Step("🧮", "الحساب", f"∫ e^{{{variable}}} d{variable} = e^{{{variable}}} + C"),
+            Step("✅", "النتيجة", f"e^{{{variable}}} + C")
+        ]
         
         self._increment_count()
-        self._log_operation("integral_exp", {}, result)
+        self._log_operation("integral_exp", {}, "exp + C")
         
         return ExecutionResult(
             success=True,
-            result=result,
-            result_str=sp.latex(result) + " + C",
-            steps=[Step("∫ تكامل أسية", f"∫ e^x dx = {sp.latex(result)} + C")]
+            result=f"e^{{{variable}}} + C",
+            result_str=f"e^{variable} + C",
+            steps=steps,
+            model="integral_exp"
         )
     
-    def integral_ln(self) -> ExecutionResult:
+    async def integral_ln(self, variable: str = 'x') -> ExecutionResult:
         """قالب 30: تكامل ln(x)"""
-        expr = sp.log(self.x)
-        result = sp.integrate(expr, self.x)
+        steps = [
+            Step("📥", "السؤال", f"∫ ln({variable}) d{variable}"),
+            Step("🔍", "التحليل", "تطبيق قاعدة تكامل اللوغاريتم الطبيعي"),
+            Step("📝", "القاعدة", "∫ ln(x) dx = x·ln|x| - x + C"),
+            Step("🧮", "الحساب", f"∫ ln({variable}) d{variable} = {variable}·ln|{variable}| - {variable} + C"),
+            Step("✅", "النتيجة", f"{variable}·ln|{variable}| - {variable} + C")
+        ]
         
         self._increment_count()
-        self._log_operation("integral_ln", {}, result)
+        self._log_operation("integral_ln", {}, "x ln x - x + C")
         
         return ExecutionResult(
             success=True,
-            result=result,
-            result_str=sp.latex(result) + " + C",
-            steps=[Step("∫ تكامل لوغاريتم", f"∫ ln(x) dx = {sp.latex(result)} + C")]
+            result=f"{variable}·ln|{variable}| - {variable} + C",
+            result_str=f"{variable}·ln|{variable}| - {variable} + C",
+            steps=steps,
+            model="integral_ln"
         )
     
-    def integral_definite(self, expr: sp.Expr, lower: float, upper: Union[float, str], var: sp.Symbol = None) -> ExecutionResult:
-        """قالب 31: تكامل محدد"""
+    async def integral_definite(self, expression: str, lower: float, upper: float, variable: str = 'x') -> ExecutionResult:
+        """قالب 31: تكامل محدد - تستقبل نص"""
         try:
-            if var is None:
-                var = self.x
+            expr = safe_sympify(expression)
+            if expr is None:
+                return ExecutionResult(success=False, error="تعبير غير صالح", model="integral_definite")
             
-            if isinstance(upper, str) and upper in ['∞', 'infinity']:
-                upper_val = sp.oo
-            else:
-                upper_val = float(upper)
+            var = ALLOWED_SYMBOLS.get(variable, sp.Symbol(variable))
             
+            steps = [
+                Step("📥", "السؤال", f"∫ من {lower} إلى {upper} لـ {expression} d{variable}"),
+                Step("🔍", "التحليل", f"إيجاد التكامل المحدد على الفترة [{lower}, {upper}]")
+            ]
+            
+            upper_val = sp.oo if upper in [float('inf'), '∞', 'infinity'] else float(upper)
             lower_val = float(lower)
             
             result = sp.integrate(expr, (var, lower_val, upper_val))
             
-            steps = [
-                Step("📦 تكامل محدد", f"∫_{lower}^{upper} {expr} d{var}"),
-                Step("✅ النتيجة", f"= {sp.latex(result)}")
-            ]
+            steps.append(Step("🧮", "الحساب", f"∫_{lower}^{upper} {expression} d{variable} = {result}", sp.latex(result)))
             
             try:
                 float_val = float(result.evalf())
                 if result != float_val:
-                    steps.append(Step("📊 قيمة تقريبية", f"≈ {float_val:.6f}"))
+                    steps.append(Step("📊", "القيمة التقريبية", f"≈ {float_val:.6f}"))
             except:
                 pass
             
+            steps.append(Step("✅", "النتيجة", str(result)))
+            
             self._increment_count()
-            self._log_operation("integral_definite", {"expr": str(expr), "lower": lower, "upper": upper}, result)
+            self._log_operation("integral_definite", {"expression": expression, "lower": lower, "upper": upper}, result)
             
             return ExecutionResult(
                 success=True,
                 result=result,
-                result_str=sp.latex(result),
-                steps=steps
+                result_str=str(result),
+                steps=steps,
+                model="integral_definite"
             )
         except Exception as e:
-            logger.error(f"Error in integral_definite: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="integral_definite")
     
-    def integral_substitution(self, func: sp.Expr) -> ExecutionResult:
-        """قالب 34: تكامل بالتعويض (تلقائي)"""
-        try:
-            result = sp.integrate(func, self.x)
-            
-            self._increment_count()
-            self._log_operation("integral_substitution", {"func": str(func)}, result)
-            
-            return ExecutionResult(
-                success=True,
-                result=result,
-                result_str=sp.latex(result) + " + C",
-                steps=[
-                    Step("🔄 تكامل بالتعويض", f"∫ {func} dx"),
-                    Step("✅ النتيجة", f"= {sp.latex(result)} + C")
-                ]
-            )
-        except Exception as e:
-            logger.error(f"Error in integral_substitution: {e}")
-            return ExecutionResult(success=False, error=str(e))
-    
-    def integral_by_parts(self, u: sp.Expr, dv: sp.Expr) -> ExecutionResult:
+    async def integral_by_parts(self, u: str, dv: str, variable: str = 'x') -> ExecutionResult:
         """قالب 33: تكامل بالأجزاء"""
         try:
-            v = sp.integrate(dv, self.x)
-            du = sp.diff(u, self.x)
-            result = u * v - sp.integrate(v * du, self.x)
+            u_expr = safe_sympify(u)
+            dv_expr = safe_sympify(dv)
+            if u_expr is None or dv_expr is None:
+                return ExecutionResult(success=False, error="تعبير غير صالح", model="integral_by_parts")
+            
+            var = ALLOWED_SYMBOLS.get(variable, sp.Symbol(variable))
             
             steps = [
-                Step("📦 تكامل بالأجزاء", f"نختار u = {u}, dv = {dv} dx"),
-                Step("📝 نحسب v", f"v = ∫ {dv} dx = {sp.latex(v)}"),
-                Step("📝 نحسب du", f"du = d/dx ({u}) dx = {sp.latex(du)} dx"),
-                Step("✅ النتيجة", f"∫ u dv = uv - ∫ v du = {sp.latex(result)} + C")
+                Step("📥", "السؤال", f"∫ {u} d({dv})"),
+                Step("🔍", "التحليل", "تطبيق قاعدة التكامل بالأجزاء"),
+                Step("📝", "القاعدة", "∫ u dv = u·v - ∫ v du")
             ]
             
+            v_expr = sp.integrate(dv_expr, var)
+            du_expr = sp.diff(u_expr, var)
+            result = u_expr * v_expr - sp.integrate(v_expr * du_expr, var)
+            
+            steps.extend([
+                Step("📝", "نختار", f"u = {u}, dv = {dv} d{variable}"),
+                Step("📝", "نحسب", f"v = ∫ {dv} d{variable} = {v_expr}"),
+                Step("📝", "نحسب", f"du = d/d{variable} ({u}) d{variable} = {du_expr} d{variable}"),
+                Step("🧮", "التطبيق", f"= {u}·{v_expr} - ∫ {v_expr}·{du_expr} d{variable}"),
+                Step("🧮", "النتيجة", f"= {result} + C", sp.latex(result)),
+                Step("✅", "النتيجة النهائية", f"{result} + C")
+            ])
+            
             self._increment_count()
-            self._log_operation("integral_by_parts", {"u": str(u), "dv": str(dv)}, result)
+            self._log_operation("integral_by_parts", {"u": u, "dv": dv}, result)
             
             return ExecutionResult(
                 success=True,
-                result=result,
-                result_str=sp.latex(result) + " + C",
-                steps=steps
+                result=f"{result} + C",
+                result_str=f"{result} + C",
+                steps=steps,
+                model="integral_by_parts"
             )
         except Exception as e:
-            logger.error(f"Error in integral_by_parts: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="integral_by_parts")
+    
+    async def integral_substitution(self, expression: str, variable: str = 'x') -> ExecutionResult:
+        """قالب 34: تكامل بالتعويض (تلقائي)"""
+        try:
+            expr = safe_sympify(expression)
+            if expr is None:
+                return ExecutionResult(success=False, error="تعبير غير صالح", model="integral_substitution")
+            
+            var = ALLOWED_SYMBOLS.get(variable, sp.Symbol(variable))
+            
+            steps = [
+                Step("📥", "السؤال", f"∫ {expression} d{variable}"),
+                Step("🔍", "التحليل", "إيجاد التكامل باستخدام التعويض المناسب")
+            ]
+            
+            result = sp.integrate(expr, var)
+            
+            steps.append(Step("🧮", "الحساب", f"= {result} + C", sp.latex(result)))
+            steps.append(Step("✅", "النتيجة", f"{result} + C"))
+            
+            self._increment_count()
+            self._log_operation("integral_substitution", {"expression": expression}, result)
+            
+            return ExecutionResult(
+                success=True,
+                result=f"{result} + C",
+                result_str=f"{result} + C",
+                steps=steps,
+                model="integral_substitution"
+            )
+        except Exception as e:
+            return ExecutionResult(success=False, error=str(e), model="integral_substitution")
     
     # ========== مصفوفات (7 قوالب) ==========
     
-    def matrix_determinant(self, matrix: List[List[float]]) -> ExecutionResult:
+    async def matrix_determinant(self, matrix: List[List[float]]) -> ExecutionResult:
         """قالب 41: محدد مصفوفة"""
         try:
             if len(matrix) > MAX_MATRIX_SIZE:
-                return ExecutionResult(
-                    success=False,
-                    error=f"حجم المصفوفة كبير جداً. الحد الأقصى {MAX_MATRIX_SIZE}x{MAX_MATRIX_SIZE}"
-                )
+                return ExecutionResult(success=False, error=f"حجم المصفوفة كبير جداً", model="matrix_determinant")
             
             M = sp.Matrix(matrix)
             result = M.det()
             
             steps = [
-                Step("📊 مصفوفة", f"{M}"),
-                Step("🔍 المحدد", f"det = {result}")
+                Step("📥", "السؤال", f"إيجاد محدد المصفوفة"),
+                Step("📊", "المصفوفة", f"{M}", sp.latex(M)),
+                Step("🧮", "الحساب", f"det = {result}"),
+                Step("✅", "النتيجة", str(result))
             ]
             
             self._increment_count()
@@ -907,35 +1169,34 @@ class MathEngine:
                 success=True,
                 result=result,
                 result_str=str(result),
-                steps=steps
+                steps=steps,
+                model="matrix_determinant"
             )
         except Exception as e:
-            logger.error(f"Error in matrix_determinant: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="matrix_determinant")
     
-    def matrix_inverse(self, matrix: List[List[float]]) -> ExecutionResult:
+    async def matrix_inverse(self, matrix: List[List[float]]) -> ExecutionResult:
         """قالب 42: معكوس مصفوفة"""
         try:
             if len(matrix) > MAX_MATRIX_SIZE:
-                return ExecutionResult(
-                    success=False,
-                    error=f"حجم المصفوفة كبير جداً. الحد الأقصى {MAX_MATRIX_SIZE}x{MAX_MATRIX_SIZE}"
-                )
+                return ExecutionResult(success=False, error=f"حجم المصفوفة كبير جداً", model="matrix_inverse")
             
             M = sp.Matrix(matrix)
             
+            steps = [
+                Step("📥", "السؤال", f"إيجاد معكوس المصفوفة"),
+                Step("📊", "المصفوفة", f"{M}", sp.latex(M))
+            ]
+            
             if not M.is_invertible():
-                return ExecutionResult(
-                    success=False,
-                    error="المصفوفة غير قابلة للعكس (محددها صفر أو غير قابلة للعكس)"
-                )
+                return ExecutionResult(success=False, error="المصفوفة غير قابلة للعكس", steps=steps, model="matrix_inverse")
             
             result = M.inv()
             
-            steps = [
-                Step("📊 مصفوفة", f"{M}"),
-                Step("🔄 المعكوس", f"M⁻¹ = {result}")
-            ]
+            steps.extend([
+                Step("🧮", "الحساب", f"M⁻¹ = {result}", sp.latex(result)),
+                Step("✅", "النتيجة", str(result))
+            ])
             
             self._increment_count()
             self._log_operation("matrix_inverse", {"matrix": matrix}, result)
@@ -944,27 +1205,26 @@ class MathEngine:
                 success=True,
                 result=result,
                 result_str=str(result),
-                steps=steps
+                steps=steps,
+                model="matrix_inverse"
             )
         except Exception as e:
-            logger.error(f"Error in matrix_inverse: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="matrix_inverse")
     
-    def matrix_transpose(self, matrix: List[List[float]]) -> ExecutionResult:
+    async def matrix_transpose(self, matrix: List[List[float]]) -> ExecutionResult:
         """قالب 43: مدور مصفوفة"""
         try:
             if len(matrix) > MAX_MATRIX_SIZE:
-                return ExecutionResult(
-                    success=False,
-                    error=f"حجم المصفوفة كبير جداً. الحد الأقصى {MAX_MATRIX_SIZE}x{MAX_MATRIX_SIZE}"
-                )
+                return ExecutionResult(success=False, error=f"حجم المصفوفة كبير جداً", model="matrix_transpose")
             
             M = sp.Matrix(matrix)
             result = M.T
             
             steps = [
-                Step("📊 مصفوفة", f"{M}"),
-                Step("🔄 المدور", f"Mᵀ = {result}")
+                Step("📥", "السؤال", f"إيجاد مدور المصفوفة"),
+                Step("📊", "المصفوفة", f"{M}", sp.latex(M)),
+                Step("🧮", "الحساب", f"Mᵀ = {result}", sp.latex(result)),
+                Step("✅", "النتيجة", str(result))
             ]
             
             self._increment_count()
@@ -974,37 +1234,41 @@ class MathEngine:
                 success=True,
                 result=result,
                 result_str=str(result),
-                steps=steps
+                steps=steps,
+                model="matrix_transpose"
             )
         except Exception as e:
-            logger.error(f"Error in matrix_transpose: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="matrix_transpose")
     
-    def matrix_multiply(self, A: List[List[float]], B: List[List[float]]) -> ExecutionResult:
+    async def matrix_multiply(self, A: List[List[float]], B: List[List[float]]) -> ExecutionResult:
         """قالب 44: ضرب مصفوفتين"""
         try:
             if len(A) > MAX_MATRIX_SIZE or len(B) > MAX_MATRIX_SIZE:
-                return ExecutionResult(
-                    success=False,
-                    error=f"حجم المصفوفة كبير جداً. الحد الأقصى {MAX_MATRIX_SIZE}x{MAX_MATRIX_SIZE}"
-                )
+                return ExecutionResult(success=False, error=f"حجم المصفوفة كبير جداً", model="matrix_multiply")
             
             M1 = sp.Matrix(A)
             M2 = sp.Matrix(B)
             
+            steps = [
+                Step("📥", "السؤال", f"ضرب مصفوفتين"),
+                Step("📊", "المصفوفة الأولى", f"{M1}", sp.latex(M1)),
+                Step("📊", "المصفوفة الثانية", f"{M2}", sp.latex(M2))
+            ]
+            
             if M1.shape[1] != M2.shape[0]:
                 return ExecutionResult(
-                    success=False,
-                    error=f"أبعاد المصفوفتين غير متوافقة للضرب: {M1.shape} و {M2.shape}"
+                    success=False, 
+                    error=f"أبعاد غير متوافقة: {M1.shape} و {M2.shape}", 
+                    steps=steps, 
+                    model="matrix_multiply"
                 )
             
             result = M1 * M2
             
-            steps = [
-                Step("📊 المصفوفة الأولى", f"{M1}"),
-                Step("📊 المصفوفة الثانية", f"{M2}"),
-                Step("✖️ حاصل الضرب", f"M1 × M2 = {result}")
-            ]
+            steps.extend([
+                Step("🧮", "الحساب", f"M1 × M2 = {result}", sp.latex(result)),
+                Step("✅", "النتيجة", str(result))
+            ])
             
             self._increment_count()
             self._log_operation("matrix_multiply", {"A": A, "B": B}, result)
@@ -1013,37 +1277,41 @@ class MathEngine:
                 success=True,
                 result=result,
                 result_str=str(result),
-                steps=steps
+                steps=steps,
+                model="matrix_multiply"
             )
         except Exception as e:
-            logger.error(f"Error in matrix_multiply: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="matrix_multiply")
     
-    def matrix_add(self, A: List[List[float]], B: List[List[float]]) -> ExecutionResult:
-        """جمع مصفوفتين"""
+    async def matrix_add(self, A: List[List[float]], B: List[List[float]]) -> ExecutionResult:
+        """قالب 45: جمع مصفوفتين"""
         try:
             if len(A) > MAX_MATRIX_SIZE or len(B) > MAX_MATRIX_SIZE:
-                return ExecutionResult(
-                    success=False,
-                    error=f"حجم المصفوفة كبير جداً. الحد الأقصى {MAX_MATRIX_SIZE}x{MAX_MATRIX_SIZE}"
-                )
+                return ExecutionResult(success=False, error=f"حجم المصفوفة كبير جداً", model="matrix_add")
             
             M1 = sp.Matrix(A)
             M2 = sp.Matrix(B)
             
+            steps = [
+                Step("📥", "السؤال", f"جمع مصفوفتين"),
+                Step("📊", "المصفوفة الأولى", f"{M1}", sp.latex(M1)),
+                Step("📊", "المصفوفة الثانية", f"{M2}", sp.latex(M2))
+            ]
+            
             if M1.shape != M2.shape:
                 return ExecutionResult(
-                    success=False,
-                    error=f"أبعاد المصفوفتين غير متطابقة للجمع: {M1.shape} و {M2.shape}"
+                    success=False, 
+                    error=f"الأبعاد غير متطابقة: {M1.shape} و {M2.shape}", 
+                    steps=steps, 
+                    model="matrix_add"
                 )
             
             result = M1 + M2
             
-            steps = [
-                Step("📊 المصفوفة الأولى", f"{M1}"),
-                Step("📊 المصفوفة الثانية", f"{M2}"),
-                Step("➕ ناتج الجمع", f"M1 + M2 = {result}")
-            ]
+            steps.extend([
+                Step("🧮", "الحساب", f"M1 + M2 = {result}", sp.latex(result)),
+                Step("✅", "النتيجة", str(result))
+            ])
             
             self._increment_count()
             self._log_operation("matrix_add", {"A": A, "B": B}, result)
@@ -1052,37 +1320,41 @@ class MathEngine:
                 success=True,
                 result=result,
                 result_str=str(result),
-                steps=steps
+                steps=steps,
+                model="matrix_add"
             )
         except Exception as e:
-            logger.error(f"Error in matrix_add: {e}")
-            return ExecutionResult(success=False, error=str(e))
-
-    def matrix_subtract(self, A: List[List[float]], B: List[List[float]]) -> ExecutionResult:
-        """طرح مصفوفتين"""
+            return ExecutionResult(success=False, error=str(e), model="matrix_add")
+    
+    async def matrix_subtract(self, A: List[List[float]], B: List[List[float]]) -> ExecutionResult:
+        """قالب 46: طرح مصفوفتين"""
         try:
             if len(A) > MAX_MATRIX_SIZE or len(B) > MAX_MATRIX_SIZE:
-                return ExecutionResult(
-                    success=False,
-                    error=f"حجم المصفوفة كبير جداً. الحد الأقصى {MAX_MATRIX_SIZE}x{MAX_MATRIX_SIZE}"
-                )
+                return ExecutionResult(success=False, error=f"حجم المصفوفة كبير جداً", model="matrix_subtract")
             
             M1 = sp.Matrix(A)
             M2 = sp.Matrix(B)
             
+            steps = [
+                Step("📥", "السؤال", f"طرح مصفوفتين"),
+                Step("📊", "المصفوفة الأولى", f"{M1}", sp.latex(M1)),
+                Step("📊", "المصفوفة الثانية", f"{M2}", sp.latex(M2))
+            ]
+            
             if M1.shape != M2.shape:
                 return ExecutionResult(
-                    success=False,
-                    error=f"أبعاد المصفوفتين غير متطابقة للطرح: {M1.shape} و {M2.shape}"
+                    success=False, 
+                    error=f"الأبعاد غير متطابقة: {M1.shape} و {M2.shape}", 
+                    steps=steps, 
+                    model="matrix_subtract"
                 )
             
             result = M1 - M2
             
-            steps = [
-                Step("📊 المصفوفة الأولى", f"{M1}"),
-                Step("📊 المصفوفة الثانية", f"{M2}"),
-                Step("➖ ناتج الطرح", f"M1 - M2 = {result}")
-            ]
+            steps.extend([
+                Step("🧮", "الحساب", f"M1 - M2 = {result}", sp.latex(result)),
+                Step("✅", "النتيجة", str(result))
+            ])
             
             self._increment_count()
             self._log_operation("matrix_subtract", {"A": A, "B": B}, result)
@@ -1091,248 +1363,271 @@ class MathEngine:
                 success=True,
                 result=result,
                 result_str=str(result),
-                steps=steps
+                steps=steps,
+                model="matrix_subtract"
             )
         except Exception as e:
-            logger.error(f"Error in matrix_subtract: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="matrix_subtract")
     
-    def matrix_eigenvalues(self, matrix: List[List[float]]) -> ExecutionResult:
-        """قالب 45: القيم الذاتية لمصفوفة"""
+    async def matrix_eigenvalues(self, matrix: List[List[float]]) -> ExecutionResult:
+        """قالب 47: القيم الذاتية لمصفوفة"""
         try:
             if len(matrix) > MAX_MATRIX_SIZE:
-                return ExecutionResult(
-                    success=False,
-                    error=f"حجم المصفوفة كبير جداً. الحد الأقصى {MAX_MATRIX_SIZE}x{MAX_MATRIX_SIZE}"
-                )
+                return ExecutionResult(success=False, error=f"حجم المصفوفة كبير جداً", model="matrix_eigenvalues")
             
             M = sp.Matrix(matrix)
             
+            steps = [
+                Step("📥", "السؤال", f"إيجاد القيم الذاتية للمصفوفة"),
+                Step("📊", "المصفوفة", f"{M}", sp.latex(M))
+            ]
+            
             if M.rows != M.cols:
                 return ExecutionResult(
-                    success=False,
-                    error="القيم الذاتية معرفة فقط للمصفوفات المربعة"
+                    success=False, 
+                    error="القيم الذاتية للمصفوفات المربعة فقط", 
+                    steps=steps, 
+                    model="matrix_eigenvalues"
                 )
             
             eigenvals = M.eigenvals()
+            result = list(eigenvals.keys())
             
-            steps = [
-                Step("📊 مصفوفة", f"{M}"),
-                Step("🔍 القيم الذاتية", f"λ = {list(eigenvals.keys())}")
-            ]
-            
-            self._increment_count()
-            self._log_operation("matrix_eigenvalues", {"matrix": matrix}, eigenvals)
-            
-            return ExecutionResult(
-                success=True,
-                result=eigenvals,
-                result_str=str(list(eigenvals.keys())),
-                steps=steps
-            )
-        except Exception as e:
-            logger.error(f"Error in matrix_eigenvalues: {e}")
-            return ExecutionResult(success=False, error=str(e))
-    
-    # ========== نهايات (5 قوالب) ==========
-    
-    def limit(self, expr: sp.Expr, var: sp.Symbol, approach: Union[float, str]) -> ExecutionResult:
-        """قالب 46: نهاية دالة"""
-        try:
-            if isinstance(approach, str):
-                if approach in ['∞', 'infinity']:
-                    approach_val = sp.oo
-                elif approach in ['-∞', '-infinity']:
-                    approach_val = -sp.oo
-                else:
-                    approach_val = float(approach)
-            else:
-                approach_val = approach
-            
-            result = sp.limit(expr, var, approach_val)
-            
-            steps = [
-                Step("📈 نهاية", f"lim_{{{var}→{approach}}} ({expr})"),
-                Step("✅ النتيجة", f"= {sp.latex(result)}")
-            ]
+            steps.extend([
+                Step("🧮", "الحساب", f"λ = {result}"),
+                Step("✅", "النتيجة", str(result))
+            ])
             
             self._increment_count()
-            self._log_operation("limit", {"expr": str(expr), "var": str(var), "approach": approach}, result)
+            self._log_operation("matrix_eigenvalues", {"matrix": matrix}, result)
             
             return ExecutionResult(
                 success=True,
                 result=result,
-                result_str=sp.latex(result),
-                steps=steps
+                result_str=str(result),
+                steps=steps,
+                model="matrix_eigenvalues"
             )
         except Exception as e:
-            logger.error(f"Error in limit: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="matrix_eigenvalues")
+    
+    # ========== نهايات (5 قوالب) ==========
+    
+    async def limit(self, expression: str, variable: str, approach: str) -> ExecutionResult:
+        """قالب 48: نهاية دالة - تستقبل نص"""
+        try:
+            expr = safe_sympify(expression)
+            if expr is None:
+                return ExecutionResult(success=False, error="تعبير غير صالح", model="limit")
+            
+            var = ALLOWED_SYMBOLS.get(variable, sp.Symbol(variable))
+            
+            steps = [
+                Step("📥", "السؤال", f"إيجاد نهاية {expression} عندما {variable} → {approach}"),
+                Step("🔍", "التحليل", f"حساب lim_{{{variable}→{approach}}} {expression}")
+            ]
+            
+            if approach in ['∞', 'infinity']:
+                approach_val = sp.oo
+            elif approach in ['-∞', '-infinity']:
+                approach_val = -sp.oo
+            else:
+                approach_val = float(approach)
+            
+            result = sp.limit(expr, var, approach_val)
+            
+            steps.append(Step("🧮", "الحساب", f"= {result}", sp.latex(result)))
+            steps.append(Step("✅", "النتيجة", str(result)))
+            
+            self._increment_count()
+            self._log_operation("limit", {"expression": expression, "approach": approach}, result)
+            
+            return ExecutionResult(
+                success=True,
+                result=result,
+                result_str=str(result),
+                steps=steps,
+                model="limit"
+            )
+        except Exception as e:
+            return ExecutionResult(success=False, error=str(e), model="limit")
     
     # ========== مثلثات (5 قوالب) ==========
     
-    def sin(self, angle: float, unit: str = "deg") -> ExecutionResult:
-        """قالب 51: جيب الزاوية"""
+    async def sin(self, angle: float, unit: str = "deg") -> ExecutionResult:
+        """قالب 49: جيب الزاوية"""
         try:
-            if unit == "deg":
-                rad = math.radians(angle)
-            else:
-                rad = angle
-            
+            rad = math.radians(angle) if unit == "deg" else angle
             result = math.sin(rad)
+            unit_str = "°" if unit == "deg" else " rad"
+            
+            steps = [
+                Step("📥", "السؤال", f"sin({angle}{unit_str})"),
+                Step("🔍", "التحليل", f"حساب جيب الزاوية {angle}{unit_str}"),
+                Step("🧮", "الحساب", f"sin({angle}{unit_str}) = {result:.6f}"),
+                Step("✅", "النتيجة", str(result))
+            ]
             
             self._increment_count()
             self._log_operation("sin", {"angle": angle, "unit": unit}, result)
             
-            unit_str = "°" if unit == "deg" else " rad"
             return ExecutionResult(
                 success=True,
                 result=result,
                 result_str=str(result),
-                steps=[Step("📐 sin", f"sin({angle}{unit_str}) = {result:.6f}")]
+                steps=steps,
+                model="sin"
             )
         except Exception as e:
-            logger.error(f"Error in sin: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="sin")
     
-    def cos(self, angle: float, unit: str = "deg") -> ExecutionResult:
-        """قالب 52: جيب تمام"""
+    async def cos(self, angle: float, unit: str = "deg") -> ExecutionResult:
+        """قالب 50: جيب تمام"""
         try:
-            if unit == "deg":
-                rad = math.radians(angle)
-            else:
-                rad = angle
-            
+            rad = math.radians(angle) if unit == "deg" else angle
             result = math.cos(rad)
+            unit_str = "°" if unit == "deg" else " rad"
+            
+            steps = [
+                Step("📥", "السؤال", f"cos({angle}{unit_str})"),
+                Step("🔍", "التحليل", f"حساب جيب تمام الزاوية {angle}{unit_str}"),
+                Step("🧮", "الحساب", f"cos({angle}{unit_str}) = {result:.6f}"),
+                Step("✅", "النتيجة", str(result))
+            ]
             
             self._increment_count()
             self._log_operation("cos", {"angle": angle, "unit": unit}, result)
             
-            unit_str = "°" if unit == "deg" else " rad"
             return ExecutionResult(
                 success=True,
                 result=result,
                 result_str=str(result),
-                steps=[Step("📐 cos", f"cos({angle}{unit_str}) = {result:.6f}")]
+                steps=steps,
+                model="cos"
             )
         except Exception as e:
-            logger.error(f"Error in cos: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="cos")
     
-    def tan(self, angle: float, unit: str = "deg") -> ExecutionResult:
-        """قالب 53: ظل الزاوية"""
+    async def tan(self, angle: float, unit: str = "deg") -> ExecutionResult:
+        """قالب 51: ظل الزاوية"""
         try:
-            if unit == "deg":
-                rad = math.radians(angle)
-            else:
-                rad = angle
-            
+            rad = math.radians(angle) if unit == "deg" else angle
             result = math.tan(rad)
+            unit_str = "°" if unit == "deg" else " rad"
+            
+            steps = [
+                Step("📥", "السؤال", f"tan({angle}{unit_str})"),
+                Step("🔍", "التحليل", f"حساب ظل الزاوية {angle}{unit_str}"),
+                Step("🧮", "الحساب", f"tan({angle}{unit_str}) = {result:.6f}"),
+                Step("✅", "النتيجة", str(result))
+            ]
             
             self._increment_count()
             self._log_operation("tan", {"angle": angle, "unit": unit}, result)
             
-            unit_str = "°" if unit == "deg" else " rad"
             return ExecutionResult(
                 success=True,
                 result=result,
                 result_str=str(result),
-                steps=[Step("📐 tan", f"tan({angle}{unit_str}) = {result:.6f}")]
+                steps=steps,
+                model="tan"
             )
         except Exception as e:
-            logger.error(f"Error in tan: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="tan")
     
-    def law_of_sines(self, a: float, A: float, b: float, unit: str = "deg") -> ExecutionResult:
-        """قالب 54: قانون الجيب"""
+    async def law_of_sines(self, a: float, A: float, b: float, unit: str = "deg") -> ExecutionResult:
+        """قالب 52: قانون الجيب"""
         try:
-            if unit == "deg":
-                A_rad = math.radians(A)
-                unit_str = "°"
-            else:
-                A_rad = A
-                unit_str = " rad"
+            unit_str = "°" if unit == "deg" else " rad"
+            A_rad = math.radians(A) if unit == "deg" else A
+            
+            steps = [
+                Step("📥", "السؤال", f"إيجاد الزاوية B باستخدام قانون الجيب: a={a}, A={A}{unit_str}, b={b}"),
+                Step("🔍", "التحليل", "تطبيق قانون الجيب: a/sin(A) = b/sin(B)")
+            ]
             
             sinA = math.sin(A_rad)
             sinB = (b * sinA) / a
             
             if not self._validate_angle_for_asin(sinB):
-                return ExecutionResult(
-                    success=False,
-                    error="لا يوجد حل - قيمة خارج نطاق arcsin"
-                )
+                return ExecutionResult(success=False, error="لا يوجد حل - قيمة خارج نطاق arcsin", steps=steps, model="law_of_sines")
             
             B_rad = math.asin(sinB)
+            B = math.degrees(B_rad) if unit == "deg" else B_rad
             
-            if unit == "deg":
-                B = math.degrees(B_rad)
-            else:
-                B = B_rad
+            steps.extend([
+                Step("📝", "الحساب", f"sin(B) = (b × sin(A)) / a = ({b} × {sinA:.4f}) / {a} = {sinB:.4f}"),
+                Step("🧮", "النتيجة", f"B = {B:.4f}{unit_str}"),
+                Step("✅", "الحل", f"الزاوية B = {B:.4f}{unit_str}")
+            ])
             
             self._increment_count()
-            self._log_operation("law_of_sines", {"a": a, "A": A, "b": b, "unit": unit}, B)
+            self._log_operation("law_of_sines", {"a": a, "A": A, "b": b}, B)
             
             return ExecutionResult(
                 success=True,
                 result=B,
-                result_str=f"{B}{unit_str}",
-                steps=[
-                    Step("📐 قانون الجيب", f"a/sin(A) = b/sin(B)"),
-                    Step("🔍 الحساب", f"sin(B) = (b × sin(A)) / a = ({b} × {sinA:.4f}) / {a} = {sinB:.4f}"),
-                    Step("✅ النتيجة", f"B = {B:.4f}{unit_str}")
-                ]
+                result_str=f"{B:.4f}{unit_str}",
+                steps=steps,
+                model="law_of_sines"
             )
         except Exception as e:
-            logger.error(f"Error in law_of_sines: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="law_of_sines")
     
-    def law_of_cosines(self, a: float, b: float, C: float, unit: str = "deg") -> ExecutionResult:
-        """قالب 55: قانون جيب التمام"""
+    async def law_of_cosines(self, a: float, b: float, C: float, unit: str = "deg") -> ExecutionResult:
+        """قالب 53: قانون جيب التمام"""
         try:
             unit_str = "°" if unit == "deg" else " rad"
+            C_rad = math.radians(C) if unit == "deg" else C
             
-            if unit == "deg":
-                C_rad = math.radians(C)
-            else:
-                C_rad = C
+            steps = [
+                Step("📥", "السؤال", f"إيجاد الضلع c: a={a}, b={b}, C={C}{unit_str}"),
+                Step("🔍", "التحليل", "تطبيق قانون جيب التمام: c² = a² + b² - 2ab·cos(C)")
+            ]
             
             cosC = math.cos(C_rad)
             c_squared = a**2 + b**2 - 2*a*b*cosC
-            
-            steps = [
-                Step("📐 قانون جيب التمام", f"c² = {a}² + {b}² - 2({a})({b}) cos({C}{unit_str})"),
-                Step("🔍 الحساب", f"c² = {a**2:.4f} + {b**2:.4f} - 2({a})({b}) × {cosC:.4f} = {c_squared:.4f}")
-            ]
-            
             c = math.sqrt(max(c_squared, 0))
             
-            if c_squared < 0:
-                steps.append(Step("⚠️ تنبيه", f"c² كانت سالبة ({c_squared:.6f})، تم استخدام max(c², 0)"))
+            steps.extend([
+                Step("📝", "الحساب", f"c² = {a}² + {b}² - 2×{a}×{b}×cos({C}{unit_str})"),
+                Step("🧮", "التفاصيل", f"= {a**2:.4f} + {b**2:.4f} - 2×{a}×{b}×{cosC:.4f} = {c_squared:.4f}"),
+                Step("🧮", "النتيجة", f"c = √{c_squared:.4f} = {c:.6f}"),
+                Step("✅", "الحل", f"الضلع c = {c:.6f}")
+            ])
             
-            steps.append(Step("✅ النتيجة", f"c = {c:.6f}"))
+            if c_squared < 0:
+                steps.insert(-2, Step("⚠️", "تنبيه", f"c² سالبة، تم استخدام القيمة المطلقة"))
             
             self._increment_count()
-            self._log_operation("law_of_cosines", {"a": a, "b": b, "C": C, "unit": unit}, c)
+            self._log_operation("law_of_cosines", {"a": a, "b": b, "C": C}, c)
             
             return ExecutionResult(
                 success=True,
                 result=c,
                 result_str=str(c),
-                steps=steps
+                steps=steps,
+                model="law_of_cosines"
             )
         except Exception as e:
-            logger.error(f"Error in law_of_cosines: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="law_of_cosines")
     
     # ========== إحصاء (5 قوالب) ==========
     
-    def mean(self, data: List[float]) -> ExecutionResult:
-        """قالب 56: المتوسط الحسابي"""
+    async def mean(self, data: List[float]) -> ExecutionResult:
+        """قالب 54: المتوسط الحسابي"""
         try:
             if not data:
-                return ExecutionResult(success=False, error="لا توجد بيانات")
+                return ExecutionResult(success=False, error="لا توجد بيانات", model="mean")
             
             result = _calculate_mean(data)
+            
+            steps = [
+                Step("📥", "السؤال", f"حساب المتوسط الحسابي للبيانات: {data}"),
+                Step("🔍", "التحليل", f"المتوسط = مجموع القيم / عددها"),
+                Step("🧮", "الحساب", f"= {sum(data):.4f} / {len(data)} = {result:.4f}"),
+                Step("✅", "النتيجة", f"{result:.4f}")
+            ]
             
             self._increment_count()
             self._log_operation("mean", {"data": data[:5]}, result)
@@ -1340,26 +1635,35 @@ class MathEngine:
             return ExecutionResult(
                 success=True,
                 result=result,
-                result_str=str(result),
-                steps=[Step("📊 متوسط", f"المتوسط = {result:.6f}")]
+                result_str=f"{result:.4f}",
+                steps=steps,
+                model="mean"
             )
         except Exception as e:
-            logger.error(f"Error in mean: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="mean")
     
-    def median(self, data: List[float]) -> ExecutionResult:
-        """قالب 57: الوسيط"""
+    async def median(self, data: List[float]) -> ExecutionResult:
+        """قالب 55: الوسيط"""
         try:
             if not data:
-                return ExecutionResult(success=False, error="لا توجد بيانات")
+                return ExecutionResult(success=False, error="لا توجد بيانات", model="median")
             
             sorted_data = sorted(data)
             n = len(sorted_data)
             
+            steps = [
+                Step("📥", "السؤال", f"حساب الوسيط للبيانات: {data}"),
+                Step("🔍", "التحليل", f"ترتيب البيانات تصاعدياً: {sorted_data}")
+            ]
+            
             if n % 2 == 1:
                 result = sorted_data[n // 2]
+                steps.append(Step("🧮", "الحساب", f"عدد البيانات فردي ({n})، الوسيط هو القيمة الوسطى: {result:.4f}"))
             else:
                 result = (sorted_data[n // 2 - 1] + sorted_data[n // 2]) / 2
+                steps.append(Step("🧮", "الحساب", f"عدد البيانات زوجي ({n})، الوسيط = (القيمتان الوسطيتان)/2 = ({sorted_data[n//2-1]:.4f} + {sorted_data[n//2]:.4f})/2 = {result:.4f}"))
+            
+            steps.append(Step("✅", "النتيجة", f"{result:.4f}"))
             
             self._increment_count()
             self._log_operation("median", {"data": data[:5]}, result)
@@ -1367,23 +1671,37 @@ class MathEngine:
             return ExecutionResult(
                 success=True,
                 result=result,
-                result_str=str(result),
-                steps=[Step("📊 وسيط", f"الوسيط = {result:.6f}")]
+                result_str=f"{result:.4f}",
+                steps=steps,
+                model="median"
             )
         except Exception as e:
-            logger.error(f"Error in median: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="median")
     
-    def variance(self, data: List[float], sample: bool = True) -> ExecutionResult:
-        """قالب 58: التباين"""
+    async def variance(self, data: List[float], sample: bool = True) -> ExecutionResult:
+        """قالب 56: التباين"""
         try:
             if not data or len(data) < 2:
-                return ExecutionResult(success=False, error="البيانات غير كافية لحساب التباين")
+                return ExecutionResult(success=False, error="البيانات غير كافية", model="variance")
             
             mean_val = _calculate_mean(data)
-            result = _calculate_variance(data, mean_val, sample)
+            var_type = "العيني" if sample else "المجتمعي"
+            n = len(data)
+            denominator = n - 1 if sample else n
             
-            variance_type = "العيني" if sample else "المجتمعي"
+            steps = [
+                Step("📥", "السؤال", f"حساب التباين {var_type} للبيانات: {data}"),
+                Step("🔍", "التحليل", f"المتوسط الحسابي = {mean_val:.4f}"),
+                Step("📝", "القانون", f"التباين = Σ(x - μ)² / {denominator}")
+            ]
+            
+            deviations = [(x - mean_val) ** 2 for x in data]
+            sum_sq = sum(deviations)
+            result = sum_sq / denominator
+            
+            steps.append(Step("🧮", "الحساب", f"Σ(x - μ)² = {sum_sq:.4f}"))
+            steps.append(Step("🧮", "التطبيق", f"التباين = {sum_sq:.4f} / {denominator} = {result:.4f}"))
+            steps.append(Step("✅", "النتيجة", f"{result:.4f}"))
             
             self._increment_count()
             self._log_operation("variance", {"data": data[:5], "sample": sample}, result)
@@ -1391,27 +1709,40 @@ class MathEngine:
             return ExecutionResult(
                 success=True,
                 result=result,
-                result_str=str(result),
-                steps=[
-                    Step("📊 متوسط", f"μ = {mean_val:.6f}"),
-                    Step(f"📊 تباين {variance_type}", f"σ² = {result:.6f}")
-                ]
+                result_str=f"{result:.4f}",
+                steps=steps,
+                model="variance"
             )
         except Exception as e:
-            logger.error(f"Error in variance: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="variance")
     
-    def std_dev(self, data: List[float], sample: bool = True) -> ExecutionResult:
-        """قالب 59: الانحراف المعياري"""
+    async def std_dev(self, data: List[float], sample: bool = True) -> ExecutionResult:
+        """قالب 57: الانحراف المعياري"""
         try:
             if not data or len(data) < 2:
-                return ExecutionResult(success=False, error="البيانات غير كافية لحساب الانحراف المعياري")
+                return ExecutionResult(success=False, error="البيانات غير كافية", model="std_dev")
             
             mean_val = _calculate_mean(data)
-            variance = _calculate_variance(data, mean_val, sample)
+            var_type = "العياري" if sample else "المجتمعي"
+            n = len(data)
+            denominator = n - 1 if sample else n
+            
+            steps = [
+                Step("📥", "السؤال", f"حساب الانحراف المعياري {var_type} للبيانات: {data}"),
+                Step("🔍", "التحليل", f"المتوسط الحسابي = {mean_val:.4f}")
+            ]
+            
+            deviations = [(x - mean_val) ** 2 for x in data]
+            sum_sq = sum(deviations)
+            variance = sum_sq / denominator
             result = variance ** 0.5
             
-            std_type = "العياري" if sample else "المجتمعي"
+            steps.extend([
+                Step("📝", "القانون", f"التباين = Σ(x - μ)² / {denominator}"),
+                Step("🧮", "التباين", f"= {sum_sq:.4f} / {denominator} = {variance:.4f}"),
+                Step("🧮", "الانحراف المعياري", f"σ = √{variance:.4f} = {result:.4f}"),
+                Step("✅", "النتيجة", f"{result:.4f}")
+            ])
             
             self._increment_count()
             self._log_operation("std_dev", {"data": data[:5], "sample": sample}, result)
@@ -1419,48 +1750,61 @@ class MathEngine:
             return ExecutionResult(
                 success=True,
                 result=result,
-                result_str=str(result),
-                steps=[
-                    Step("📊 متوسط", f"μ = {mean_val:.6f}"),
-                    Step("📊 تباين", f"σ² = {variance:.6f}"),
-                    Step(f"📊 انحراف معياري {std_type}", f"σ = {result:.6f}")
-                ]
+                result_str=f"{result:.4f}",
+                steps=steps,
+                model="std_dev"
             )
         except Exception as e:
-            logger.error(f"Error in std_dev: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="std_dev")
     
-    def correlation(self, data1: List[float], data2: List[float]) -> ExecutionResult:
-        """قالب 60: معامل ارتباط بيرسون"""
+    async def correlation(self, data1: List[float], data2: List[float]) -> ExecutionResult:
+        """قالب 58: معامل ارتباط بيرسون"""
         try:
             if len(data1) != len(data2) or len(data1) < 2:
-                return ExecutionResult(success=False, error="البيانات غير صالحة لحساب الارتباط")
+                return ExecutionResult(success=False, error="البيانات غير صالحة", model="correlation")
             
             n = len(data1)
             mean1 = _calculate_mean(data1)
             mean2 = _calculate_mean(data2)
             
-            covariance = sum((data1[i] - mean1) * (data2[i] - mean2) for i in range(n)) / (n - 1)
+            steps = [
+                Step("📥", "السؤال", f"حساب معامل الارتباط بين المجموعتين"),
+                Step("📊", "البيانات الأولى", f"{data1}"),
+                Step("📊", "البيانات الثانية", f"{data2}"),
+                Step("🔍", "التحليل", f"المتوسط الأول = {mean1:.4f}, المتوسط الثاني = {mean2:.4f}")
+            ]
             
+            covariance = sum((data1[i] - mean1) * (data2[i] - mean2) for i in range(n)) / (n - 1)
             std1 = _calculate_std_dev(data1, mean1, sample=True)
             std2 = _calculate_std_dev(data2, mean2, sample=True)
             
             if std1 == 0 or std2 == 0:
-                return ExecutionResult(success=False, error="لا يمكن حساب الارتباط (أحد المتغيرات ثابت)")
+                return ExecutionResult(success=False, error="أحد المتغيرات ثابت", steps=steps, model="correlation")
             
             result = covariance / (std1 * std2)
             
             abs_r = abs(result)
             if abs_r > 0.9:
-                interpretation = "قوية جداً"
+                strength = "قوية جداً"
             elif abs_r > 0.7:
-                interpretation = "قوية"
+                strength = "قوية"
             elif abs_r > 0.5:
-                interpretation = "متوسطة"
+                strength = "متوسطة"
             elif abs_r > 0.3:
-                interpretation = "ضعيفة"
+                strength = "ضعيفة"
             else:
-                interpretation = "ضعيفة جداً"
+                strength = "ضعيفة جداً"
+            
+            direction = "طردية" if result > 0 else "عكسية"
+            
+            steps.extend([
+                Step("📝", "التغاير", f"cov = {covariance:.4f}"),
+                Step("📝", "الانحراف المعياري الأول", f"σ₁ = {std1:.4f}"),
+                Step("📝", "الانحراف المعياري الثاني", f"σ₂ = {std2:.4f}"),
+                Step("🧮", "معامل الارتباط", f"r = cov / (σ₁·σ₂) = {covariance:.4f} / ({std1:.4f}×{std2:.4f}) = {result:.4f}"),
+                Step("📊", "التفسير", f"علاقة {direction} {strength}"),
+                Step("✅", "النتيجة", f"r = {result:.4f}")
+            ])
             
             self._increment_count()
             self._log_operation("correlation", {}, result)
@@ -1468,30 +1812,85 @@ class MathEngine:
             return ExecutionResult(
                 success=True,
                 result=result,
-                result_str=f"{result:.6f}",
-                steps=[
-                    Step("📊 معامل الارتباط (بيرسون)", f"r = {result:.6f}"),
-                    Step("📝 تفسير", f"قوة العلاقة: {interpretation}" + 
-                         (" (طردية)" if result > 0 else " (عكسية)" if result < 0 else ""))
-                ]
+                result_str=f"{result:.4f}",
+                steps=steps,
+                model="correlation"
             )
         except Exception as e:
-            logger.error(f"Error in correlation: {e}")
-            return ExecutionResult(success=False, error=str(e))
+            return ExecutionResult(success=False, error=str(e), model="correlation")
+    
+    # ========== إضافيات (قوالب 59-60) ==========
+    
+    async def simplify(self, expression: str) -> ExecutionResult:
+        """قالب 59: تبسيط تعبير جبري"""
+        try:
+            expr = safe_sympify(expression)
+            if expr is None:
+                return ExecutionResult(success=False, error="تعبير غير صالح", model="simplify")
+            
+            steps = [
+                Step("📥", "السؤال", f"تبسيط: {expression}"),
+                Step("🔍", "التحليل", "تطبيق قواعد التبسيط الجبرية")
+            ]
+            
+            simplified = sp.simplify(expr)
+            
+            steps.append(Step("🧮", "التبسيط", f"= {simplified}", sp.latex(simplified)))
+            steps.append(Step("✅", "النتيجة", str(simplified)))
+            
+            self._increment_count()
+            self._log_operation("simplify", {"expression": expression}, simplified)
+            
+            return ExecutionResult(
+                success=True,
+                result=simplified,
+                result_str=str(simplified),
+                steps=steps,
+                model="simplify"
+            )
+        except Exception as e:
+            return ExecutionResult(success=False, error=str(e), model="simplify")
+    
+    async def expand(self, expression: str) -> ExecutionResult:
+        """قالب 60: فك الأقواس"""
+        try:
+            expr = safe_sympify(expression)
+            if expr is None:
+                return ExecutionResult(success=False, error="تعبير غير صالح", model="expand")
+            
+            steps = [
+                Step("📥", "السؤال", f"فك الأقواس: {expression}"),
+                Step("🔍", "التحليل", "تطبيق خاصية التوزيع")
+            ]
+            
+            expanded = sp.expand(expr)
+            
+            steps.append(Step("🧮", "الفك", f"= {expanded}", sp.latex(expanded)))
+            steps.append(Step("✅", "النتيجة", str(expanded)))
+            
+            self._increment_count()
+            self._log_operation("expand", {"expression": expression}, expanded)
+            
+            return ExecutionResult(
+                success=True,
+                result=expanded,
+                result_str=str(expanded),
+                steps=steps,
+                model="expand"
+            )
+        except Exception as e:
+            return ExecutionResult(success=False, error=str(e), model="expand")
     
     # ========== سجل العمليات وإحصائيات ==========
     
     def get_history(self, limit: int = 10) -> List[Dict]:
-        """الحصول على آخر العمليات"""
         return self.history[-limit:]
     
     def clear_history(self):
-        """مسح سجل العمليات"""
         self.history.clear()
         logger.info("History cleared")
     
     def get_stats(self):
-        """الحصول على إحصائيات المحرك"""
         return {
             "execution_count": self.execution_count,
             "status": "ready",
