@@ -1,4 +1,4 @@
-# calculator.py - آلة حاسبة علمية متكاملة للمهندسين (نسخة فائقة)
+# calculator.py - آلة حاسبة علمية متكاملة للمهندسين (نسخة متوافقة مع api.py)
 import sympy as sp
 from sympy.parsing.sympy_parser import parse_expr, standard_transformations, implicit_multiplication_application, convert_xor
 import math
@@ -76,12 +76,13 @@ class CommandHistory:
 
 class Calculator:
     """
-    آلة حاسبة علمية متكاملة للمهندسين (نسخة فائقة)
+    آلة حاسبة علمية متكاملة للمهندسين (نسخة متوافقة مع api.py)
     - جميع العمليات الحسابية والرياضية
     - دعم الرموز الرياضية والتكامل الرمزي
-    - رسوم بيانية متكاملة
+    - رسوم بيانية متكاملة مع دعم kwargs
     - سجل أوامر ذكي مع حد أقصى
     - تخزين مؤقت متطور
+    - دعم نظام المعادلات
     """
     
     def __init__(self, cache_capacity: int = 100, history_max: int = 200):
@@ -251,18 +252,33 @@ class Calculator:
         except Exception as e:
             raise ValueError(f"تعبير غير صالح: {e}")
     
-    # ========== دوال الرسم البياني ==========
-    def plot(self, expression: str, var: str = 'x', 
+    # ========== دوال الرسم البياني المحسّنة (تدعم kwargs) ==========
+    def plot(self, expression: str = None, var: str = 'x', 
              limits: Tuple[float, float] = (-10, 10), 
              points: int = 1000,
              show: bool = False,
-             title: str = None) -> Optional[str]:
+             title: str = None,
+             xlabel: str = None,
+             ylabel: str = None,
+             theme: str = None,
+             grid: bool = True,
+             show_legend: bool = True,
+             width: int = 800,
+             height: int = 600,
+             **kwargs) -> Optional[str]:
         """
-        رسم بياني لدالة
+        رسم بياني لدالة مع دعم kwargs
         إذا show=False: يرجع base64 image string
         إذا show=True: يعرض النافذة مباشرة
         """
         try:
+            # استخدام expression من kwargs إذا لم يكن موجوداً
+            if expression is None and 'expression' in kwargs:
+                expression = kwargs['expression']
+            
+            if expression is None:
+                raise ValueError("لم يتم تحديد تعبير للرسم")
+            
             expr = self._parse_expr(expression)
             var_sym = self.local_dict.get(var, sp.Symbol(var))
             
@@ -273,15 +289,28 @@ class Calculator:
             x_vals = np.linspace(limits[0], limits[1], points)
             y_vals = f(x_vals)
             
-            # إنشاء الشكل
-            plt.figure(figsize=(10, 6))
-            plt.plot(x_vals, y_vals, 'b-', linewidth=2)
-            plt.grid(True, alpha=0.3)
-            plt.xlabel(f'${var}$')
-            plt.ylabel(f'${sp.latex(expr)}$')
+            # إنشاء الشكل مع الأبعاد المحددة
+            plt.figure(figsize=(width/100, height/100))
+            
+            # تطبيق الثيم
+            if theme == 'dark':
+                plt.style.use('dark_background')
+            elif theme == 'blue':
+                plt.style.use('seaborn-v0_8-darkgrid')
+            
+            plt.plot(x_vals, y_vals, 'b-', linewidth=2, label=f'${sp.latex(expr)}$')
+            
+            if grid:
+                plt.grid(True, alpha=0.3)
+            
+            plt.xlabel(xlabel or f'${var}$')
+            plt.ylabel(ylabel or f'${sp.latex(expr)}$')
             plt.title(title or f'${sp.latex(expr)}$')
             plt.axhline(y=0, color='k', linewidth=0.5)
             plt.axvline(x=0, color='k', linewidth=0.5)
+            
+            if show_legend:
+                plt.legend()
             
             if show:
                 plt.show()
@@ -298,17 +327,37 @@ class Calculator:
         except Exception as e:
             return f"خطأ في الرسم: {e}"
     
-    def plot_multiple(self, expressions: List[str], var: str = 'x',
+    def plot_multiple(self, expressions: List[str] = None, var: str = 'x',
                       limits: Tuple[float, float] = (-10, 10),
                       labels: List[str] = None,
-                      show: bool = False) -> Optional[str]:
-        """رسم عدة دوال في نفس الشكل"""
+                      show: bool = False,
+                      title: str = None,
+                      theme: str = None,
+                      grid: bool = True,
+                      width: int = 800,
+                      height: int = 600,
+                      **kwargs) -> Optional[str]:
+        """رسم عدة دوال في نفس الشكل مع دعم kwargs"""
         try:
+            # استخدام expressions من kwargs إذا لم يكن موجوداً
+            if expressions is None and 'expressions' in kwargs:
+                expressions = kwargs['expressions']
+            
+            if expressions is None or len(expressions) == 0:
+                raise ValueError("لم يتم تحديد دوال للرسم")
+            
             var_sym = self.local_dict.get(var, sp.Symbol(var))
             x_vals = np.linspace(limits[0], limits[1], 1000)
             
-            plt.figure(figsize=(10, 6))
-            colors = ['b', 'r', 'g', 'c', 'm', 'y', 'k']
+            plt.figure(figsize=(width/100, height/100))
+            
+            # تطبيق الثيم
+            if theme == 'dark':
+                plt.style.use('dark_background')
+            elif theme == 'blue':
+                plt.style.use('seaborn-v0_8-darkgrid')
+            
+            colors = ['b', 'r', 'g', 'c', 'm', 'y', 'k', 'orange', 'purple', 'brown']
             
             for i, expr_str in enumerate(expressions):
                 expr = self._parse_expr(expr_str)
@@ -319,9 +368,12 @@ class Calculator:
                 label = labels[i] if labels and i < len(labels) else f'${sp.latex(expr)}$'
                 plt.plot(x_vals, y_vals, color=color, linewidth=2, label=label)
             
-            plt.grid(True, alpha=0.3)
+            if grid:
+                plt.grid(True, alpha=0.3)
+            
             plt.xlabel(f'${var}$')
             plt.ylabel('$f(' + var + ')$')
+            plt.title(title or 'رسم دوال متعددة')
             plt.legend()
             plt.axhline(y=0, color='k', linewidth=0.5)
             plt.axvline(x=0, color='k', linewidth=0.5)
@@ -478,6 +530,16 @@ class Calculator:
         except Exception as e:
             return f"خطأ في حل المعادلة: {e}"
     
+    # ========== حل نظام معادلات (إضافة جديدة) ==========
+    def solve_system(self, equations: List[str]) -> str:
+        """حل نظام معادلات"""
+        try:
+            # دمج المعادلات في نص واحد مفصول بفواصل منقوطة
+            equations_str = "; ".join(equations)
+            return self.solve_equation(equations_str)
+        except Exception as e:
+            return f"خطأ في حل نظام المعادلات: {e}"
+    
     # ========== دوال جبرية ==========
     def simplify(self, expression: str) -> str:
         try:
@@ -564,7 +626,11 @@ class Calculator:
             return f"خطأ في التكامل: {e}"
     
     # ========== نهايات ==========
-    def limit(self, expression: str, var: str = 'x', approach: str = '0') -> str:
+    def limit(self, expression: str, var: str = 'x', approach: str = '0', direction: str = '+') -> str:
+        """
+        إيجاد نهاية دالة مع دعم الاتجاه
+        direction: '+' (يمين), '-' (يسار)
+        """
         try:
             expr = self._parse_expr(expression)
             var_sym = self.local_dict.get(var, sp.Symbol(var))
@@ -576,7 +642,13 @@ class Calculator:
             else:
                 approach_val = sp.sympify(approach)
             
-            result = sp.limit(expr, var_sym, approach_val)
+            if direction == '+':
+                result = sp.limit(expr, var_sym, approach_val, dir='+')
+            elif direction == '-':
+                result = sp.limit(expr, var_sym, approach_val, dir='-')
+            else:
+                result = sp.limit(expr, var_sym, approach_val)
+            
             return str(result)
         except Exception as e:
             return f"خطأ في النهاية: {e}"
