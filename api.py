@@ -427,7 +427,7 @@ for dir_path in [static_dir, plots_dir, temp_dir, LOG_DIR]:
 # توجيه المجلد الثابت
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# ========== نماذج البيانات الكاملة ==========
+# ========== نماذج البيانات الكاملة (مع تعديل regex إلى pattern) ==========
 class ExpressionRequest(BaseModel):
     expression: str = Field(..., description="التعبير الرياضي", min_length=1, max_length=1000)
     
@@ -527,7 +527,7 @@ class FactorRequest(BaseModel):
 
 class DiffRequest(BaseModel):
     expression: str = Field(..., description="الدالة", min_length=1, max_length=1000)
-    var: str = Field("x", description="متغير الاشتقاق", regex="^[a-zA-Z]$")
+    var: str = Field("x", description="متغير الاشتقاق", pattern="^[a-zA-Z]$")  # ✅ تم التعديل
     order: int = Field(1, description="رتبة المشتقة", ge=1, le=10)
     
     @validator('expression')
@@ -547,7 +547,7 @@ class DiffRequest(BaseModel):
 
 class IntegrateRequest(BaseModel):
     expression: str = Field(..., description="الدالة", min_length=1, max_length=1000)
-    var: str = Field("x", description="متغير التكامل", regex="^[a-zA-Z]$")
+    var: str = Field("x", description="متغير التكامل", pattern="^[a-zA-Z]$")  # ✅ تم التعديل
     lower: Optional[float] = Field(None, description="الحد الأدنى")
     upper: Optional[float] = Field(None, description="الحد الأعلى")
     
@@ -568,7 +568,7 @@ class IntegrateRequest(BaseModel):
 
 class LimitRequest(BaseModel):
     expression: str = Field(..., description="الدالة", min_length=1, max_length=1000)
-    var: str = Field("x", description="المتغير", regex="^[a-zA-Z]$")
+    var: str = Field("x", description="المتغير", pattern="^[a-zA-Z]$")  # ✅ تم التعديل
     approach: str = Field("0", description="قيمة الاقتراب")
     direction: PlotDirection = Field(PlotDirection.PLUS, description="الاتجاه (+ أو - أو +-)")
     
@@ -1829,6 +1829,7 @@ if __name__ == "__main__":
     print("  ✅ وقت تنفيذ دقيق لكل طلب")
     print("  ✅ معالجة متقدمة للأخطاء")
     print("  ✅ تحسين معالجة Plot مع fallback")
+    print("  ✅ توافق مع Pydantic V2 (pattern بدلاً من regex)")
     print("="*80)
     
     uvicorn.run(
