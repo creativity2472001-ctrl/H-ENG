@@ -1,5 +1,6 @@
 # calculator.py - محرك الحسابات الأساسي
 import math
+import re
 
 class Calculator:
     """آلة حاسبة علمية - تعمل مع CLI والويب"""
@@ -24,6 +25,44 @@ class Calculator:
             return result
         except Exception as e:
             return f"خطأ: {e}"
+    
+    # ========== حل المعادلات (إضافة جديدة) ==========
+    
+    def solve_equation(self, equation: str):
+        """حل معادلة بسيطة مثل x+5=10 أو 2x+3=7"""
+        try:
+            if '=' not in equation:
+                return "المعادلة يجب أن تحتوي على علامة ="
+            
+            # استيراد sympy هنا لتجنب الاعتماد عليه إذا لم يكن مثبتاً
+            from sympy import symbols, Eq, solve, sympify
+            
+            x = symbols('x')
+            left, right = equation.split('=')
+            
+            # تحويل 2x إلى 2*x
+            left = left.strip()
+            left = re.sub(r'(\d+)([a-zA-Z])', r'\1*\2', left)
+            left = re.sub(r'([a-zA-Z])(\d+)', r'\1*\2', left)
+            
+            # تحويل الطرفين إلى تعابير sympy
+            left_expr = sympify(left)
+            right_expr = sympify(right.strip())
+            
+            eq = Eq(left_expr, right_expr)
+            solutions = solve(eq, x)
+            
+            if not solutions:
+                return "لا يوجد حل"
+            
+            if len(solutions) == 1:
+                return f"x = {solutions[0]}"
+            else:
+                return f"x = {solutions}"
+        except ImportError:
+            return "خطأ: مكتبة sympy غير مثبتة. قم بتشغيل: pip install sympy"
+        except Exception as e:
+            return f"خطأ في حل المعادلة: {e}"
     
     # ========== عمليات منفصلة (للويب) ==========
     
