@@ -687,7 +687,7 @@
             }
         }
 
-        // إرسال السؤال إلى الخادم
+        // إرسال السؤال إلى الخادم - ✅ تم التعديل هنا
         async function sendQuestion() {
             const question = document.getElementById('questionInput').value.trim();
             const sendButton = document.getElementById('sendButton');
@@ -713,12 +713,13 @@
             `;
             
             try {
+                // ✅ التعديل الوحيد: تغيير question إلى equation
                 const response = await fetch('/solve', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ question: question })
+                    body: JSON.stringify({ equation: question })  // ✅ تم التعديل هنا
                 });
                 
                 const data = await response.json();
