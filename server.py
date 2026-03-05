@@ -1,4 +1,4 @@
-# server.py - خادم API للواجهة
+# server.py - خادم الويب
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -34,17 +34,13 @@ async def calculate(data: ExpressionRequest):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-@app.get("/health")
-async def health():
-    return {"status": "healthy"}
-
 @app.get("/")
 async def root():
     return FileResponse(str(static_dir / "index.html"))
 
 if __name__ == "__main__":
     print("="*50)
-    print("🚀 تشغيل خادم API للآلة الحاسبة")
+    print("🚀 تشغيل خادم الويب")
     print(f"📍 http://127.0.0.1:8000")
     print("="*50)
     uvicorn.run(app, host="127.0.0.1", port=8000)
