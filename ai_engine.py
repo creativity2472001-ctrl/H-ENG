@@ -1,4 +1,4 @@
-# ai_engine.py - الإصدار النهائي المُدقق (v7.1)
+# ai_engine.py - الإصدار المحسّن مع خطوات عرض نظيفة (v8.0)
 import re
 import hashlib
 import json
@@ -6,6 +6,7 @@ import logging
 import asyncio
 from typing import Dict, Any, Optional, List, Union, Tuple
 from datetime import datetime
+from dataclasses import dataclass, field
 import sympy as sp
 from sympy.parsing.sympy_parser import parse_expr, standard_transformations, implicit_multiplication_application
 
@@ -75,6 +76,53 @@ ALLOWED_SYMBOLS = {
 
 # الأسماء المسموح بها في التعبيرات
 ALLOWED_NAMES = set(ALLOWED_SYMBOLS.keys())
+
+# ========== كلاس الخطوات للتنسيق النظيف ==========
+@dataclass
+class Step:
+    """خطوة حل واحدة مع أيقونة وتنسيق نظيف"""
+    icon: str  # 📥, 🔍, 📝, 🧮, ✅, ⚠️, 📐, ∫, ∑, etc.
+    title: str
+    content: str
+    latex: Optional[str] = None
+    
+    def to_dict(self) -> dict:
+        """تحويل الخطوة إلى قاموس للتخزين"""
+        return {
+            "icon": self.icon,
+            "title": self.title,
+            "content": self.content,
+            "latex": self.latex
+        }
+    
+    def __str__(self) -> str:
+        """تمثيل نصي للخطوة"""
+        if self.latex:
+            return f"{self.icon} **{self.title}**: {self.content} \[{self.latex}\]"
+        return f"{self.icon} **{self.title}**: {self.content}"
+
+@dataclass
+class StepResult:
+    """نتيجة مع خطوات الحل"""
+    success: bool
+    result: Any = None
+    result_str: str = ""
+    steps: List[Step] = field(default_factory=list)
+    error: Optional[str] = None
+    model: str = ""
+    extracted_data: Optional[Dict] = None
+    
+    def to_dict(self) -> dict:
+        """تحويل النتيجة إلى قاموس للتخزين والعرض"""
+        return {
+            "success": self.success,
+            "result": str(self.result) if self.result is not None else None,
+            "result_str": self.result_str,
+            "steps": [step.to_dict() for step in self.steps],
+            "error": self.error,
+            "model": self.model,
+            "extracted_data": self.extracted_data
+        }
 
 def safe_sympify(expr_str: str) -> Optional[sp.Expr]:
     """
@@ -317,17 +365,17 @@ class Memory:
         return {**self.stats, "history_size": len(self.history), "cache_size": len(self.cache)}
 
 class AIEngine:
-    """محرك الرياضيات الهندسي المتكامل - نسخة الإنتاج الآمنة"""
+    """محرك الرياضيات الهندسي المتكامل - نسخة الإنتاج الآمنة مع خطوات عرض نظيفة"""
     
     def __init__(self):
         self.memory = Memory()
         self.processing_count = 0
         # تعريف المتغيرات الرمزية الشائعة
         self.x, self.y, self.z, self.t, self.n, self.k = sp.symbols('x y z t n k')
-        print("✅ AI Engine v7.1 - محرك رياضي آمن ومُدقق للإنتاج")
-        logger.info("AI Engine v7.1 initialized with security measures")
+        print("✅ AI Engine v8.0 - محرك رياضي آمن مع خطوات عرض نظيفة")
+        logger.info("AI Engine v8.0 initialized with security measures and clean steps")
     
-    def _log_processing(self, question: str, template: str, result: Dict):
+    def _log_processing(self, question: str, template: str, result: StepResult):
         """تسجيل معالجة سؤال"""
         self.processing_count += 1
         logger.info(f"📝 Processed #{self.processing_count}: {template} - {question[:50]}...")
@@ -345,7 +393,7 @@ class AIEngine:
     
     # ========== القوالب الأساسية ==========
     
-    async def template_calculator(self, question: str) -> Optional[Dict]:
+    async def template_calculator(self, question: str) -> Optional[StepResult]:
         """
         قالب الآلة الحاسبة المتقدمة
         أمثلة: "2+2", "sin(pi/2)", "sqrt(2)", "2^3 + 4*2"
@@ -365,36 +413,42 @@ class AIEngine:
             result = expr.evalf()
             result_float = float(result)
             
-            steps = [f"حساب: {clean_q}"]
+            steps = [
+                Step("📥", "السؤال", f"حساب: {clean_q}"),
+                Step("🔍", "التحليل", "تعبير رياضي بسيط يتطلب عمليات حسابية")
+            ]
             
             # محاولة التبسيط إن أمكن
             try:
                 simplified = sp.simplify(expr)
                 if simplified != expr:
-                    steps.append(f"التبسيط: {simplified}")
+                    steps.append(Step("📝", "التبسيط", f"تبسيط التعبير إلى {simplified}", sp.latex(simplified)))
             except:
                 pass
             
             # إظهار النتيجة الدقيقة إن وجدت
             if result.is_Rational and result.q != 1:
-                steps.append(f"القيمة الدقيقة: {expr}")
-                steps.append(f"القيمة التقريبية: {result_float:.6f}")
+                steps.append(Step("🧮", "الحساب", f"{clean_q} = {expr}", sp.latex(expr)))
+                steps.append(Step("📊", "القيمة التقريبية", f"≈ {result_float:.6f}"))
             else:
-                steps.append(f"النتيجة: {result_float}")
+                steps.append(Step("🧮", "الحساب", f"{clean_q} = {result_float}"))
             
-            self._log_processing(question, "calculator", {"result": result_float})
-            return {
-                "success": True,
-                "result": str(result_float),
-                "result_exact": str(expr) if expr.is_Rational else None,
-                "steps": steps,
-                "model": "calculator"
-            }
+            steps.append(Step("✅", "النتيجة", str(result_float)))
+            
+            self._log_processing(question, "calculator", None)
+            return StepResult(
+                success=True,
+                result=result_float,
+                result_str=str(result_float),
+                steps=steps,
+                model="calculator",
+                extracted_data={"expression": clean_q}
+            )
         
         # تنفيذ مع مهلة زمنية
         return await run_with_timeout(calculate())
     
-    async def template_sqrt(self, question: str) -> Optional[Dict]:
+    async def template_sqrt(self, question: str) -> Optional[StepResult]:
         """
         قالب الجذر التربيعي - نسخة مصححة
         أمثلة: "جذر 16", "sqrt 25", "√2", "sqrt(2)"
@@ -426,28 +480,39 @@ class AIEngine:
                     result = sp.sqrt(expr)
                     simplified = sp.simplify(result)
                     
-                    steps = [f"√({arg}) = {simplified}"]
+                    steps = [
+                        Step("📥", "السؤال", f"إيجاد الجذر التربيعي لـ {arg}"),
+                        Step("🔍", "التحليل", f"نريد حساب √{arg}"),
+                        Step("📝", "القانون", "الجذر التربيعي: √a = a^(1/2)")
+                    ]
                     
                     # قيمة تقريبية إن أمكن
                     try:
                         float_val = float(simplified.evalf())
                         if simplified != float_val:
-                            steps.append(f"القيمة التقريبية: {float_val:.6f}")
+                            steps.append(Step("🧮", "الحساب", f"√({arg}) = {simplified}", sp.latex(simplified)))
+                            steps.append(Step("📊", "القيمة التقريبية", f"≈ {float_val:.6f}"))
+                        else:
+                            steps.append(Step("🧮", "الحساب", f"√({arg}) = {simplified}", sp.latex(simplified)))
                     except:
-                        pass
+                        steps.append(Step("🧮", "الحساب", f"√({arg}) = {simplified}", sp.latex(simplified)))
                     
-                    self._log_processing(question, "sqrt", {"result": str(simplified)})
-                    return {
-                        "success": True,
-                        "result": str(simplified),
-                        "steps": steps,
-                        "model": "sqrt"
-                    }
+                    steps.append(Step("✅", "النتيجة", str(simplified)))
+                    
+                    self._log_processing(question, "sqrt", None)
+                    return StepResult(
+                        success=True,
+                        result=simplified,
+                        result_str=str(simplified),
+                        steps=steps,
+                        model="sqrt",
+                        extracted_data={"argument": arg}
+                    )
                 
                 return await run_with_timeout(calculate_sqrt())
         return None
     
-    async def template_power(self, question: str) -> Optional[Dict]:
+    async def template_power(self, question: str) -> Optional[StepResult]:
         """
         قالب الرفع للقوة
         أمثلة: "2^3", "5^2", "2 أس 3", "2^0.5", "x^2"
@@ -476,30 +541,41 @@ class AIEngine:
                     result = sp.Pow(base, exp, evaluate=False)
                     simplified = sp.simplify(result)
                     
-                    steps = [f"{base_str}^{exp_str} = {simplified}"]
+                    steps = [
+                        Step("📥", "السؤال", f"حساب {base_str} ^ {exp_str}"),
+                        Step("🔍", "التحليل", f"رفع {base_str} إلى القوة {exp_str}"),
+                        Step("📝", "القانون", f"a^b = a مرفوعة للقوة b")
+                    ]
                     
                     # قيمة تقريبية إن أمكن
                     try:
                         float_val = float(simplified.evalf())
                         if simplified != float_val:
-                            steps.append(f"القيمة التقريبية: {float_val:.6f}")
+                            steps.append(Step("🧮", "الحساب", f"{base_str}^{exp_str} = {simplified}", sp.latex(simplified)))
+                            steps.append(Step("📊", "القيمة التقريبية", f"≈ {float_val:.6f}"))
+                        else:
+                            steps.append(Step("🧮", "الحساب", f"{base_str}^{exp_str} = {simplified}", sp.latex(simplified)))
                     except:
-                        pass
+                        steps.append(Step("🧮", "الحساب", f"{base_str}^{exp_str} = {simplified}", sp.latex(simplified)))
                     
-                    self._log_processing(question, "power", {"result": str(simplified)})
-                    return {
-                        "success": True,
-                        "result": str(simplified),
-                        "steps": steps,
-                        "model": "power"
-                    }
+                    steps.append(Step("✅", "النتيجة", str(simplified)))
+                    
+                    self._log_processing(question, "power", None)
+                    return StepResult(
+                        success=True,
+                        result=simplified,
+                        result_str=str(simplified),
+                        steps=steps,
+                        model="power",
+                        extracted_data={"base": base_str, "exponent": exp_str}
+                    )
                 
                 return await run_with_timeout(calculate_power())
         return None
     
     # ========== قوالب المعادلات ==========
     
-    async def template_solve_equation(self, question: str) -> Optional[Dict]:
+    async def template_solve_equation(self, question: str) -> Optional[StepResult]:
         """
         قالب حل المعادلات (يدعم أي متغيرات)
         أمثلة: "2x + 3 = 7", "2y + 3 = 7", "x^2 - 5x + 6 = 0", "sin(x) = 0.5"
@@ -527,39 +603,47 @@ class AIEngine:
             # استخراج المتغيرات المستخدمة
             symbols = self._get_symbols_from_expr(equation_expr)
             
+            steps = [
+                Step("📥", "السؤال", f"حل المعادلة: {left} = {right}"),
+                Step("🔍", "التحليل", f"المعادلة تحتوي على المتغيرات: {', '.join([str(s) for s in symbols]) if symbols else 'لا يوجد متغيرات'}")
+            ]
+            
             if not symbols:
                 # معادلة بدون متغيرات (تحقق من صحة)
                 if equation_expr == 0:
-                    return {
-                        "success": True,
-                        "result": "المعادلة صحيحة دائماً",
-                        "steps": [f"{left} = {right} هو تطابق"],
-                        "model": "solve_equation"
-                    }
+                    steps.append(Step("✅", "التحقق", "المعادلة صحيحة دائماً (تطابق)"))
+                    return StepResult(
+                        success=True,
+                        result="المعادلة صحيحة دائماً",
+                        result_str="المعادلة صحيحة دائماً",
+                        steps=steps,
+                        model="solve_equation",
+                        extracted_data={"left": left, "right": right}
+                    )
                 else:
-                    return {
-                        "success": False,
-                        "result": f"المعادلة خاطئة: {equation_expr} ≠ 0",
-                        "steps": [f"{left} = {right} غير صحيح"],
-                        "model": "solve_equation"
-                    }
+                    steps.append(Step("❌", "التحقق", f"المعادلة خاطئة: {equation_expr} ≠ 0"))
+                    return StepResult(
+                        success=False,
+                        error="المعادلة غير صحيحة",
+                        steps=steps,
+                        model="solve_equation",
+                        extracted_data={"left": left, "right": right}
+                    )
+            
+            steps.append(Step("📝", "إعادة الترتيب", f"{left} - {right} = 0 → {equation_expr}", sp.latex(equation_expr)))
             
             # حل المعادلة لجميع المتغيرات
             solutions = sp.solve(equation_expr, symbols)
             
-            steps = [
-                f"المعادلة: {left} = {right}",
-                f"إعادة الترتيب: {left} - {right} = 0",
-                f"التبسيط: {equation_expr}"
-            ]
-            
             if not solutions:
-                return {
-                    "success": False,
-                    "error": "لا يوجد حل للمعادلة",
-                    "steps": steps,
-                    "model": "solve_equation"
-                }
+                steps.append(Step("⚠️", "نتيجة", "لا يوجد حل للمعادلة"))
+                return StepResult(
+                    success=False,
+                    error="لا يوجد حل للمعادلة",
+                    steps=steps,
+                    model="solve_equation",
+                    extracted_data={"left": left, "right": right}
+                )
             
             # تنسيق النتائج
             if isinstance(solutions, dict):
@@ -568,7 +652,7 @@ class AIEngine:
                 for var, val in solutions.items():
                     result_parts.append(f"{var} = {val}")
                 result_str = ', '.join(result_parts)
-                steps.append(f"الحل: {result_str}")
+                steps.append(Step("🧮", "الحل", result_str))
             elif isinstance(solutions, list):
                 # قائمة حلول
                 if len(symbols) == 1:
@@ -577,28 +661,31 @@ class AIEngine:
                         result_str = f"{var} = {solutions[0]}"
                     else:
                         result_str = f"{var} ∈ {solutions}"
-                    steps.append(f"الحل: {result_str}")
+                    steps.append(Step("🧮", "الحل", result_str))
                 else:
                     result_str = str(solutions)
-                    steps.append(f"الحلول: {result_str}")
+                    steps.append(Step("🧮", "الحلول", result_str))
             else:
                 # حل وحيد
                 var = symbols[0]
                 result_str = f"{var} = {solutions}"
-                steps.append(f"الحل: {result_str}")
+                steps.append(Step("🧮", "الحل", result_str))
             
-            self._log_processing(question, "solve_equation", {"solutions": str(solutions)})
-            return {
-                "success": True,
-                "result": result_str,
-                "solutions": str(solutions),
-                "steps": steps,
-                "model": "solve_equation"
-            }
+            steps.append(Step("✅", "النتيجة النهائية", result_str))
+            
+            self._log_processing(question, "solve_equation", None)
+            return StepResult(
+                success=True,
+                result=result_str,
+                result_str=result_str,
+                steps=steps,
+                model="solve_equation",
+                extracted_data={"left": left, "right": right, "symbols": [str(s) for s in symbols]}
+            )
         
         return await run_with_timeout(solve())
     
-    async def template_quadratic_formula(self, question: str) -> Optional[Dict]:
+    async def template_quadratic_formula(self, question: str) -> Optional[StepResult]:
         """
         قالب عرض القانون العام للمعادلة التربيعية (ميزة تعليمية)
         أمثلة: "قانون المعادلة التربيعية", "quadratic formula"
@@ -608,31 +695,27 @@ class AIEngine:
         
         if any(kw in question.lower() for kw in ['قانون', 'formula', 'quadratic', 'تربيعية', 'القانون']):
             steps = [
-                "القانون العام للمعادلة التربيعية: ax² + bx + c = 0",
-                "",
-                "الحل: x = (-b ± √(b² - 4ac)) / (2a)",
-                "",
-                "حيث:",
-                "• a: معامل x²",
-                "• b: معامل x",
-                "• c: الحد الثابت",
-                "• Δ = b² - 4ac: المميز",
-                "",
-                "حسب قيمة المميز:",
-                "• إذا كان Δ > 0: حلان حقيقيان مختلفان",
-                "• إذا كان Δ = 0: حل حقيقي مكرر",
-                "• إذا كان Δ < 0: حلان مركبان"
+                Step("📥", "السؤال", "طلب عرض القانون العام للمعادلة التربيعية"),
+                Step("🔍", "الشرح", "المعادلة التربيعية هي معادلة من الدرجة الثانية على الصورة: ax² + bx + c = 0"),
+                Step("📝", "القانون العام", "x = (-b ± √(b² - 4ac)) / (2a)", 
+                     "x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}"),
+                Step("📊", "حيث", 
+                     "• a: معامل x²\n• b: معامل x\n• c: الحد الثابت\n• Δ = b² - 4ac: المميز"),
+                Step("📈", "تحليل المميز",
+                     "• إذا كان Δ > 0: حلان حقيقيان مختلفان\n• إذا كان Δ = 0: حل حقيقي مكرر\n• إذا كان Δ < 0: حلان مركبان"),
+                Step("✅", "الخلاصة", "القانون العام يحل أي معادلة تربيعية")
             ]
             
-            return {
-                "success": True,
-                "result": "القانون العام للمعادلة التربيعية",
-                "steps": steps,
-                "model": "quadratic_formula"
-            }
+            return StepResult(
+                success=True,
+                result="القانون العام للمعادلة التربيعية",
+                result_str="القانون العام للمعادلة التربيعية",
+                steps=steps,
+                model="quadratic_formula"
+            )
         return None
     
-    async def template_system_equations(self, question: str) -> Optional[Dict]:
+    async def template_system_equations(self, question: str) -> Optional[StepResult]:
         """
         قالب نظام معادلات
         أمثلة: "2x+3y=5, 4x-2y=10", "x+y+z=6, 2x-y+z=3, x+2y-z=2"
@@ -648,6 +731,8 @@ class AIEngine:
             # تحويل المعادلات إلى تعابير SymPy
             exprs = []
             all_symbols = set()
+            
+            steps = [Step("📥", "السؤال", f"حل نظام المعادلات: {', '.join([f'{l}={r}' for l, r in equations])}")]
             
             for left, right in equations:
                 left_expr = safe_sympify(left)
@@ -665,29 +750,27 @@ class AIEngine:
                     all_symbols.add(symbol)
             
             symbols_list = list(all_symbols)
+            steps.append(Step("🔍", "التحليل", f"المتغيرات في النظام: {', '.join([str(s) for s in symbols_list])}"))
             
             # حل النظام
             solution = sp.solve(exprs, symbols_list)
             
-            steps = ["نظام المعادلات:"]
-            for i, (left, right) in enumerate(equations):
-                steps.append(f"  معادلة {i+1}: {left} = {right}")
-            
             if not solution:
-                return {
-                    "success": False,
-                    "error": "لا يوجد حل للنظام",
-                    "steps": steps,
-                    "model": "system_equations"
-                }
+                steps.append(Step("⚠️", "نتيجة", "لا يوجد حل للنظام"))
+                return StepResult(
+                    success=False,
+                    error="لا يوجد حل للنظام",
+                    steps=steps,
+                    model="system_equations"
+                )
             
             # تنسيق النتائج
             if isinstance(solution, list):
                 # عدة حلول
-                steps.append(f"عدد الحلول: {len(solution)}")
+                steps.append(Step("📊", "عدد الحلول", f"تم إيجاد {len(solution)} حلول"))
                 for i, sol in enumerate(solution):
                     sol_str = ', '.join([f"{var} = {sol[var]}" for var in symbols_list])
-                    steps.append(f"الحل {i+1}: {sol_str}")
+                    steps.append(Step(f"🔢", f"الحل {i+1}", sol_str))
                 result_str = f"تم إيجاد {len(solution)} حلول"
             else:
                 # حل وحيد
@@ -695,22 +778,25 @@ class AIEngine:
                 for var, val in solution.items():
                     result_parts.append(f"{var} = {val}")
                 result_str = ', '.join(result_parts)
-                steps.append(f"الحل: {result_str}")
+                steps.append(Step("🧮", "الحل", result_str))
             
-            self._log_processing(question, "system_equations", {"solution": str(solution)})
-            return {
-                "success": True,
-                "result": result_str,
-                "solutions": str(solution),
-                "steps": steps,
-                "model": "system_equations"
-            }
+            steps.append(Step("✅", "النتيجة النهائية", result_str))
+            
+            self._log_processing(question, "system_equations", None)
+            return StepResult(
+                success=True,
+                result=result_str,
+                result_str=result_str,
+                steps=steps,
+                model="system_equations",
+                extracted_data={"equations": [(l, r) for l, r in equations]}
+            )
         
         return await run_with_timeout(solve_system())
     
     # ========== قوالب التفاضل والتكامل ==========
     
-    async def template_derivative(self, question: str) -> Optional[Dict]:
+    async def template_derivative(self, question: str) -> Optional[StepResult]:
         """
         قالب المشتقات
         أمثلة: "اشتق x^2", "مشتقة sin(x)", "derivative of x^3", "d/dx (x^2 + 2x)"
@@ -748,27 +834,32 @@ class AIEngine:
             else:
                 var = symbols[0]  # المشتقة بالنسبة لأول متغير
             
+            steps = [
+                Step("📥", "السؤال", f"إيجاد مشتقة: {func_str}"),
+                Step("🔍", "التحليل", f"نريد حساب المشتقة بالنسبة للمتغير {var}"),
+                Step("📝", "قاعدة الاشتقاق", "تطبيق قواعد الاشتقاق المناسبة")
+            ]
+            
             # حساب المشتقة
             derivative = sp.diff(expr, var)
             simplified = sp.simplify(derivative)
             
-            steps = [
-                f"الدالة: {func_str}",
-                f"المشتقة بالنسبة لـ {var}:",
-                f"d/d{var} ({func_str}) = {simplified}"
-            ]
+            steps.append(Step("🧮", "الحساب", f"d/d{var} ({func_str}) = {simplified}", sp.latex(simplified)))
+            steps.append(Step("✅", "النتيجة", str(simplified)))
             
-            self._log_processing(question, "derivative", {"result": str(simplified)})
-            return {
-                "success": True,
-                "result": str(simplified),
-                "steps": steps,
-                "model": "derivative"
-            }
+            self._log_processing(question, "derivative", None)
+            return StepResult(
+                success=True,
+                result=simplified,
+                result_str=str(simplified),
+                steps=steps,
+                model="derivative",
+                extracted_data={"function": func_str, "variable": str(var)}
+            )
         
         return await run_with_timeout(calculate_derivative())
     
-    async def template_integral(self, question: str) -> Optional[Dict]:
+    async def template_integral(self, question: str) -> Optional[StepResult]:
         """
         قالب التكامل (يدعم المحدد وغير المحدد)
         أمثلة: "∫ x^2 dx", "تكامل x^2", "∫_0^1 x^2 dx"
@@ -801,35 +892,43 @@ class AIEngine:
                     # تحويل قيمة النهاية
                     if upper in ['∞', 'infinity']:
                         upper_val = sp.oo
+                        upper_display = "∞"
                     else:
                         upper_val = float(upper)
+                        upper_display = upper
                     
                     lower_val = float(lower)
+                    
+                    steps = [
+                        Step("📥", "السؤال", f"تكامل محدد: ∫ من {lower} إلى {upper} لـ {func_str} dx"),
+                        Step("🔍", "التحليل", f"إيجاد التكامل المحدد للدالة {func_str} على الفترة [{lower}, {upper_display}]"),
+                        Step("📝", "القانون", "∫ f(x) dx من a إلى b = F(b) - F(a)")
+                    ]
                     
                     x = sp.Symbol('x')
                     integral = sp.integrate(expr, (x, lower_val, upper_val))
                     
-                    steps = [
-                        f"الدالة: {func_str}",
-                        f"التكامل المحدد من {lower_val} إلى {upper_val}",
-                        f"∫ {func_str} dx = {integral}"
-                    ]
+                    steps.append(Step("🧮", "الحساب", f"∫ {func_str} dx = {integral}", sp.latex(integral)))
                     
                     # قيمة تقريبية
                     try:
                         float_val = float(integral.evalf())
                         if integral != float_val:
-                            steps.append(f"القيمة التقريبية: {float_val:.6f}")
+                            steps.append(Step("📊", "القيمة التقريبية", f"≈ {float_val:.6f}"))
                     except:
                         pass
                     
-                    self._log_processing(question, "integral_definite", {"result": str(integral)})
-                    return {
-                        "success": True,
-                        "result": str(integral),
-                        "steps": steps,
-                        "model": "integral_definite"
-                    }
+                    steps.append(Step("✅", "النتيجة", str(integral)))
+                    
+                    self._log_processing(question, "integral_definite", None)
+                    return StepResult(
+                        success=True,
+                        result=integral,
+                        result_str=str(integral),
+                        steps=steps,
+                        model="integral_definite",
+                        extracted_data={"function": func_str, "lower": lower, "upper": upper}
+                    )
                 
                 return await run_with_timeout(calculate_definite())
         
@@ -850,28 +949,34 @@ class AIEngine:
                     if expr is None:
                         return None
                     
+                    steps = [
+                        Step("📥", "السؤال", f"تكامل غير محدد: ∫ {func_str} dx"),
+                        Step("🔍", "التحليل", f"إيجاد الدالة الأصلية للدالة {func_str}"),
+                        Step("📝", "القانون", "∫ f(x) dx = F(x) + C")
+                    ]
+                    
                     x = sp.Symbol('x')
                     integral = sp.integrate(expr, x)
                     
-                    steps = [
-                        f"الدالة: {func_str}",
-                        f"∫ {func_str} dx = {integral} + C",
-                        "حيث C ثابت التكامل"
-                    ]
+                    steps.append(Step("🧮", "الحساب", f"∫ {func_str} dx = {integral} + C", sp.latex(integral)))
+                    steps.append(Step("✅", "النتيجة", f"{integral} + C"))
+                    steps.append(Step("ℹ️", "ملاحظة", "C هو ثابت التكامل"))
                     
-                    self._log_processing(question, "integral_indefinite", {"result": str(integral)})
-                    return {
-                        "success": True,
-                        "result": f"{integral} + C",
-                        "steps": steps,
-                        "model": "integral_indefinite"
-                    }
+                    self._log_processing(question, "integral_indefinite", None)
+                    return StepResult(
+                        success=True,
+                        result=f"{integral} + C",
+                        result_str=f"{integral} + C",
+                        steps=steps,
+                        model="integral_indefinite",
+                        extracted_data={"function": func_str}
+                    )
                 
                 return await run_with_timeout(calculate_indefinite())
         
         return None
     
-    async def template_limit(self, question: str) -> Optional[Dict]:
+    async def template_limit(self, question: str) -> Optional[StepResult]:
         """
         قالب النهايات
         أمثلة: "نهاية x^2 عندما x → 2", "limit sin(x)/x as x→0", "lim_{x→0} sin(x)/x"
@@ -898,31 +1003,39 @@ class AIEngine:
             # تحويل قيمة النهاية
             if val_str in ['∞', 'infinity']:
                 val = sp.oo
+                val_display = "∞"
             elif val_str in ['-∞', '-infinity']:
                 val = -sp.oo
+                val_display = "-∞"
             else:
                 val = float(val_str)
+                val_display = val_str
+            
+            steps = [
+                Step("📥", "السؤال", f"إيجاد نهاية {func_str} عندما {var_str} → {val_display}"),
+                Step("🔍", "التحليل", f"حساب lim_{{{var_str}→{val_display}}} {func_str}"),
+                Step("📝", "القانون", "النهاية هي قيمة الدالة عندما يقترب المتغير من قيمة معينة")
+            ]
             
             # حساب النهاية
             limit_val = sp.limit(expr, var, val)
             
-            steps = [
-                f"الدالة: {func_str}",
-                f"عندما {var_str} → {val_str}",
-                f"النهاية = {limit_val}"
-            ]
+            steps.append(Step("🧮", "الحساب", f"lim_{{{var_str}→{val_display}}} {func_str} = {limit_val}", sp.latex(limit_val)))
+            steps.append(Step("✅", "النتيجة", str(limit_val)))
             
-            self._log_processing(question, "limit", {"result": str(limit_val)})
-            return {
-                "success": True,
-                "result": str(limit_val),
-                "steps": steps,
-                "model": "limit"
-            }
+            self._log_processing(question, "limit", None)
+            return StepResult(
+                success=True,
+                result=limit_val,
+                result_str=str(limit_val),
+                steps=steps,
+                model="limit",
+                extracted_data={"function": func_str, "variable": var_str, "approach": val_display}
+            )
         
         return await run_with_timeout(calculate_limit())
     
-    async def template_sum(self, question: str) -> Optional[Dict]:
+    async def template_sum(self, question: str) -> Optional[StepResult]:
         """
         قالب المجموع - نسخة مصححة
         أمثلة: "مجموع k^2 من 1 إلى 10", "sum_{i=1}^{n} i", "∑_{k=1}^{∞} 1/k^2"
@@ -947,40 +1060,47 @@ class AIEngine:
             
             var = ALLOWED_SYMBOLS.get(var_str, sp.Symbol(var_str))
             
+            steps = [
+                Step("📥", "السؤال", f"حساب المجموع: ∑ {func_str} من {var_str}={start} إلى {end}"),
+                Step("🔍", "التحليل", f"إيجاد مجموع قيم {func_str} عندما {var_str} يأخذ القيم من {start} إلى {end}")
+            ]
+            
             # حساب المجموع
             if end in ['∞', 'infinity']:
+                end_display = "∞"
                 sum_val = sp.Sum(expr, (var, sp.Integer(start), sp.oo)).doit()
             else:
                 end_val = float(end) if isinstance(end, (int, float, str)) and str(end).replace('.', '').replace('-', '').isdigit() else end
+                end_display = end
                 sum_val = sp.Sum(expr, (var, sp.Integer(start), sp.Integer(end_val))).doit()
             
-            steps = [
-                f"المجموع: ∑ {func_str}",
-                f"من {var_str} = {start} إلى {end}",
-                f"= {sum_val}"
-            ]
+            steps.append(Step("🧮", "الحساب", f"∑ {func_str} = {sum_val}", sp.latex(sum_val)))
             
             # قيمة تقريبية
             try:
                 float_val = float(sum_val.evalf())
                 if sum_val != float_val:
-                    steps.append(f"القيمة التقريبية: {float_val:.6f}")
+                    steps.append(Step("📊", "القيمة التقريبية", f"≈ {float_val:.6f}"))
             except:
                 pass
             
-            self._log_processing(question, "sum", {"result": str(sum_val)})
-            return {
-                "success": True,
-                "result": str(sum_val),
-                "steps": steps,
-                "model": "sum"
-            }
+            steps.append(Step("✅", "النتيجة", str(sum_val)))
+            
+            self._log_processing(question, "sum", None)
+            return StepResult(
+                success=True,
+                result=sum_val,
+                result_str=str(sum_val),
+                steps=steps,
+                model="sum",
+                extracted_data={"function": func_str, "variable": var_str, "start": start, "end": end_display}
+            )
         
         return await run_with_timeout(calculate_sum())
     
     # ========== قوالب المصفوفات ==========
     
-    async def template_matrix_operations(self, question: str) -> Optional[Dict]:
+    async def template_matrix_operations(self, question: str) -> Optional[StepResult]:
         """
         قالب عمليات المصفوفات
         أمثلة: 
@@ -1007,80 +1127,122 @@ class AIEngine:
             
             if len(matrices) == 2:
                 if '+' in question or 'جمع' in q_lower:
-                    result = matrices[0] + matrices[1]
                     operation = "جمع"
                     steps = [
-                        f"المصفوفة الأولى: {matrices[0]}",
-                        f"المصفوفة الثانية: {matrices[1]}",
-                        f"ناتج الجمع: {result}"
+                        Step("📥", "السؤال", f"عملية جمع مصفوفتين"),
+                        Step("🔍", "التحليل", "جمع المصفوفتين عنصراً بعنصر")
                     ]
+                    steps.append(Step("📊", "المصفوفة الأولى", f"{matrices[0]}", sp.latex(matrices[0])))
+                    steps.append(Step("📊", "المصفوفة الثانية", f"{matrices[1]}", sp.latex(matrices[1])))
+                    result = matrices[0] + matrices[1]
+                    
                 elif '-' in question and 'معكوس' not in q_lower:
-                    result = matrices[0] - matrices[1]
                     operation = "طرح"
                     steps = [
-                        f"المصفوفة الأولى: {matrices[0]}",
-                        f"المصفوفة الثانية: {matrices[1]}",
-                        f"ناتج الطرح: {result}"
+                        Step("📥", "السؤال", f"عملية طرح مصفوفتين"),
+                        Step("🔍", "التحليل", "طرح المصفوفتين عنصراً من عنصر")
                     ]
+                    steps.append(Step("📊", "المصفوفة الأولى", f"{matrices[0]}", sp.latex(matrices[0])))
+                    steps.append(Step("📊", "المصفوفة الثانية", f"{matrices[1]}", sp.latex(matrices[1])))
+                    result = matrices[0] - matrices[1]
+                    
                 elif '*' in question or 'ضرب' in q_lower:
-                    result = matrices[0] * matrices[1]
                     operation = "ضرب"
                     steps = [
-                        f"المصفوفة الأولى: {matrices[0]}",
-                        f"المصفوفة الثانية: {matrices[1]}",
-                        f"ناتج الضرب: {result}"
+                        Step("📥", "السؤال", f"عملية ضرب مصفوفتين"),
+                        Step("🔍", "التحليل", "ضرب المصفوفتين (صف × عمود)")
                     ]
+                    steps.append(Step("📊", "المصفوفة الأولى", f"{matrices[0]}", sp.latex(matrices[0])))
+                    steps.append(Step("📊", "المصفوفة الثانية", f"{matrices[1]}", sp.latex(matrices[1])))
+                    result = matrices[0] * matrices[1]
+                    
             elif len(matrices) == 1:
                 M = matrices[0]
                 
                 if 'محدد' in q_lower or 'det' in q_lower:
+                    operation = "محدد"
+                    steps = [
+                        Step("📥", "السؤال", f"إيجاد محدد المصفوفة"),
+                        Step("🔍", "التحليل", "حساب محدد المصفوفة (للمصفوفات المربعة فقط)")
+                    ]
+                    steps.append(Step("📊", "المصفوفة", f"{M}", sp.latex(M)))
                     if M.rows == M.cols:
                         result = M.det()
-                        operation = "محدد"
-                        steps = [
-                            f"المصفوفة: {M}",
-                            f"المحدد = {result}"
-                        ]
+                        steps.append(Step("📝", "القانون", "det(A) = مجموع حاصل ضرب العناصر مع الإشارات المناسبة"))
+                    else:
+                        return StepResult(
+                            success=False,
+                            error="المحدد يُحسب فقط للمصفوفات المربعة",
+                            steps=steps,
+                            model="matrix_operations"
+                        )
+                        
                 elif 'معكوس' in q_lower or 'inverse' in q_lower:
+                    operation = "معكوس"
+                    steps = [
+                        Step("📥", "السؤال", f"إيجاد معكوس المصفوفة"),
+                        Step("🔍", "التحليل", "إيجاد المصفوفة A⁻¹ حيث A × A⁻¹ = I")
+                    ]
+                    steps.append(Step("📊", "المصفوفة", f"{M}", sp.latex(M)))
                     if M.rows == M.cols:
                         try:
                             result = M.inv()
-                            operation = "معكوس"
-                            steps = [
-                                f"المصفوفة: {M}",
-                                f"المعكوس: {result}"
-                            ]
+                            steps.append(Step("📝", "الشرط", "المصفوفة قابلة للعكس لأن محددها ≠ 0"))
                         except Exception as e:
-                            return {
-                                "success": False,
-                                "error": "المصفوفة غير قابلة للعكس (محددها صفر)",
-                                "model": "matrix_operations"
-                            }
+                            return StepResult(
+                                success=False,
+                                error="المصفوفة غير قابلة للعكس (محددها صفر)",
+                                steps=steps,
+                                model="matrix_operations"
+                            )
+                    else:
+                        return StepResult(
+                            success=False,
+                            error="المعكوس يُحسب فقط للمصفوفات المربعة",
+                            steps=steps,
+                            model="matrix_operations"
+                        )
+                        
                 elif 'مدور' in q_lower or 'transpose' in q_lower:
-                    result = M.T
                     operation = "مدور"
                     steps = [
-                        f"المصفوفة: {M}",
-                        f"المدور: {result}"
+                        Step("📥", "السؤال", f"إيجاد مدور المصفوفة"),
+                        Step("🔍", "التحليل", "تبديل الأعمدة بالصفوف")
                     ]
+                    steps.append(Step("📊", "المصفوفة", f"{M}", sp.latex(M)))
+                    result = M.T
+                    
                 elif 'قيم' in q_lower and 'ذاتية' in q_lower or 'eigenvalue' in q_lower:
+                    operation = "قيم ذاتية"
+                    steps = [
+                        Step("📥", "السؤال", f"إيجاد القيم الذاتية للمصفوفة"),
+                        Step("🔍", "التحليل", "إيجاد λ حيث det(A - λI) = 0")
+                    ]
+                    steps.append(Step("📊", "المصفوفة", f"{M}", sp.latex(M)))
                     if M.rows == M.cols:
                         eigenvals = M.eigenvals()
                         result = str(eigenvals)
-                        operation = "قيم ذاتية"
-                        steps = [
-                            f"المصفوفة: {M}",
-                            f"القيم الذاتية: {eigenvals}"
-                        ]
+                    else:
+                        return StepResult(
+                            success=False,
+                            error="القيم الذاتية تُحسب فقط للمصفوفات المربعة",
+                            steps=steps,
+                            model="matrix_operations"
+                        )
             
             if result is not None:
-                self._log_processing(question, "matrix_operations", {"result": str(result)})
-                return {
-                    "success": True,
-                    "result": str(result),
-                    "steps": steps,
-                    "model": f"matrix_{operation}"
-                }
+                steps.append(Step("🧮", "الحساب", f"النتيجة = {result}", sp.latex(result) if hasattr(result, 'shape') else None))
+                steps.append(Step("✅", "النتيجة النهائية", str(result)))
+                
+                self._log_processing(question, "matrix_operations", None)
+                return StepResult(
+                    success=True,
+                    result=result,
+                    result_str=str(result),
+                    steps=steps,
+                    model=f"matrix_{operation}",
+                    extracted_data={"operation": operation}
+                )
             
             return None
         
@@ -1088,7 +1250,7 @@ class AIEngine:
     
     # ========== قوالب التحويلات ==========
     
-    async def template_laplace(self, question: str) -> Optional[Dict]:
+    async def template_laplace(self, question: str) -> Optional[StepResult]:
         """
         قالب تحويل لابلاس
         أمثلة: "لاپلاس sin(t)", "laplace of e^(at)", "L{ t^2 }"
@@ -1112,32 +1274,37 @@ class AIEngine:
                     if expr is None:
                         return None
                     
+                    steps = [
+                        Step("📥", "السؤال", f"إيجاد تحويل لابلاس للدالة: {func_str}"),
+                        Step("🔍", "التحليل", f"حساب L{{{func_str}}} = ∫₀^∞ {func_str}·e^(-st) dt"),
+                        Step("📝", "القانون", "تحويل لابلاس: L{f(t)} = F(s)")
+                    ]
+                    
                     t = sp.Symbol('t')
                     s = sp.Symbol('s')
                     
                     # تحويل لابلاس
                     laplace_transform = sp.laplace_transform(expr, t, s)
                     
-                    steps = [
-                        f"الدالة: {func_str}",
-                        f"تحويل لابلاس: L{{{func_str}}} = {laplace_transform[0]}",
-                        f"شرط الوجود: {laplace_transform[1]}"
-                    ]
+                    steps.append(Step("🧮", "الحساب", f"L{{{func_str}}} = {laplace_transform[0]}", sp.latex(laplace_transform[0])))
+                    steps.append(Step("📊", "شرط الوجود", f"Re(s) > {laplace_transform[1]}"))
+                    steps.append(Step("✅", "النتيجة", str(laplace_transform[0])))
                     
-                    self._log_processing(question, "laplace", {"result": str(laplace_transform[0])})
-                    return {
-                        "success": True,
-                        "result": str(laplace_transform[0]),
-                        "condition": str(laplace_transform[1]),
-                        "steps": steps,
-                        "model": "laplace"
-                    }
+                    self._log_processing(question, "laplace", None)
+                    return StepResult(
+                        success=True,
+                        result=laplace_transform[0],
+                        result_str=str(laplace_transform[0]),
+                        steps=steps,
+                        model="laplace",
+                        extracted_data={"function": func_str}
+                    )
                 
                 return await run_with_timeout(calculate_laplace())
         
         return None
     
-    async def template_inverse_laplace(self, question: str) -> Optional[Dict]:
+    async def template_inverse_laplace(self, question: str) -> Optional[StepResult]:
         """
         قالب تحويل لابلاس العكسي
         أمثلة: "لاپلاس عكسي 1/(s^2+1)", "inverse laplace of 1/(s-a)"
@@ -1161,24 +1328,30 @@ class AIEngine:
                     if expr is None:
                         return None
                     
+                    steps = [
+                        Step("📥", "السؤال", f"إيجاد تحويل لابلاس العكسي للدالة: {func_str}"),
+                        Step("🔍", "التحليل", f"حساب L⁻¹{{{func_str}}}"),
+                        Step("📝", "القانون", "تحويل لابلاس العكسي: L⁻¹{F(s)} = f(t)")
+                    ]
+                    
                     s = sp.Symbol('s')
                     t = sp.Symbol('t')
                     
                     # تحويل لابلاس العكسي
                     inverse_laplace = sp.inverse_laplace_transform(expr, s, t)
                     
-                    steps = [
-                        f"الدالة في مجال s: {func_str}",
-                        f"تحويل لابلاس العكسي: L⁻¹{{{func_str}}} = {inverse_laplace}"
-                    ]
+                    steps.append(Step("🧮", "الحساب", f"L⁻¹{{{func_str}}} = {inverse_laplace}", sp.latex(inverse_laplace)))
+                    steps.append(Step("✅", "النتيجة", str(inverse_laplace)))
                     
-                    self._log_processing(question, "inverse_laplace", {"result": str(inverse_laplace)})
-                    return {
-                        "success": True,
-                        "result": str(inverse_laplace),
-                        "steps": steps,
-                        "model": "inverse_laplace"
-                    }
+                    self._log_processing(question, "inverse_laplace", None)
+                    return StepResult(
+                        success=True,
+                        result=inverse_laplace,
+                        result_str=str(inverse_laplace),
+                        steps=steps,
+                        model="inverse_laplace",
+                        extracted_data={"function": func_str}
+                    )
                 
                 return await run_with_timeout(calculate_inverse_laplace())
         
@@ -1186,7 +1359,7 @@ class AIEngine:
     
     # ========== قوالب المعادلات التفاضلية ==========
     
-    async def template_differential_equation(self, question: str) -> Optional[Dict]:
+    async def template_differential_equation(self, question: str) -> Optional[StepResult]:
         """
         قالب حل المعادلات التفاضلية - نسخة محسنة
         أمثلة: 
@@ -1207,6 +1380,8 @@ class AIEngine:
             
             # تنظيف السؤال
             clean_q = q_lower.replace(' ', '')
+            
+            steps = [Step("📥", "السؤال", f"حل المعادلة التفاضلية: {question}")]
             
             # أنماط متعددة للمعادلات التفاضلية
             patterns = [
@@ -1236,6 +1411,9 @@ class AIEngine:
                         if expr is None:
                             continue
                         
+                        steps.append(Step("🔍", "التحليل", f"معادلة تفاضلية من الدرجة الأولى: dy/dx = {rhs}"))
+                        steps.append(Step("📝", "القانون", "الحل: ∫ dy = ∫ f(x) dx"))
+                        
                         diff_eq = sp.Eq(y.diff(x), expr)
                         solution = sp.dsolve(diff_eq, y)
                         
@@ -1245,82 +1423,85 @@ class AIEngine:
                             ics_val = re.search(r'y\(0\)=([^,)\s]+)', q_lower)
                             if ics_val:
                                 ics[y.subs(x, 0)] = float(ics_val.group(1))
+                                steps.append(Step("📊", "الشرط الابتدائي", f"y(0) = {ics_val.group(1)}"))
                         
                         if "y'(0)" in q_lower:
                             ics_deriv_val = re.search(r"y'\(0\)=([^,)\s]+)", q_lower)
                             if ics_deriv_val:
                                 ics[y.diff(x).subs(x, 0)] = float(ics_deriv_val.group(1))
+                                steps.append(Step("📊", "الشرط الابتدائي", f"y'(0) = {ics_deriv_val.group(1)}"))
                         
                         if ics:
                             solution_with_ics = sp.dsolve(diff_eq, y, ics=ics)
-                            steps = [
-                                f"المعادلة: dy/dx = {rhs}",
-                                f"الشروط الابتدائية: {ics}",
-                                f"الحل الخاص: {solution_with_ics}"
-                            ]
-                            self._log_processing(question, "differential_equation", {"result": str(solution_with_ics)})
-                            return {
-                                "success": True,
-                                "result": str(solution_with_ics.rhs),
-                                "full_solution": str(solution_with_ics),
-                                "steps": steps,
-                                "model": "differential_equation"
-                            }
+                            steps.append(Step("🧮", "الحل الخاص", str(solution_with_ics), sp.latex(solution_with_ics)))
+                            steps.append(Step("✅", "النتيجة", str(solution_with_ics.rhs)))
+                            
+                            return StepResult(
+                                success=True,
+                                result=str(solution_with_ics.rhs),
+                                result_str=str(solution_with_ics.rhs),
+                                steps=steps,
+                                model="differential_equation",
+                                extracted_data={"equation": question, "ics": ics}
+                            )
                         else:
-                            steps = [
-                                f"المعادلة: dy/dx = {rhs}",
-                                f"الحل العام: {solution}"
-                            ]
-                            self._log_processing(question, "differential_equation", {"result": str(solution)})
-                            return {
-                                "success": True,
-                                "result": str(solution.rhs),
-                                "full_solution": str(solution),
-                                "steps": steps,
-                                "model": "differential_equation"
-                            }
+                            steps.append(Step("🧮", "الحل العام", str(solution), sp.latex(solution)))
+                            steps.append(Step("✅", "النتيجة", str(solution.rhs)))
+                            
+                            return StepResult(
+                                success=True,
+                                result=str(solution.rhs),
+                                result_str=str(solution.rhs),
+                                steps=steps,
+                                model="differential_equation",
+                                extracted_data={"equation": question}
+                            )
                     
                     elif pattern == r"y''([+-]\d*)y'([+-]\d*)y=0":
                         # معادلة من الدرجة الثانية
                         b = 0 if match.group(1) == '' else float(match.group(1))
                         c = float(match.group(2))
                         
+                        steps.append(Step("🔍", "التحليل", f"معادلة تفاضلية من الدرجة الثانية: y'' + {b}y' + {c}y = 0"))
+                        steps.append(Step("📝", "القانون", "المعادلة المميزة: r² + br + c = 0"))
+                        
                         # بناء المعادلة: y'' + b*y' + c*y = 0
                         diff_eq = sp.Eq(y.diff(x, 2) + b*y.diff(x) + c*y, 0)
                         solution = sp.dsolve(diff_eq, y)
                         
-                        steps = [
-                            f"المعادلة: y'' + {b}y' + {c}y = 0",
-                            f"الحل العام: {solution}"
-                        ]
-                        self._log_processing(question, "differential_equation", {"result": str(solution)})
-                        return {
-                            "success": True,
-                            "result": str(solution.rhs),
-                            "full_solution": str(solution),
-                            "steps": steps,
-                            "model": "differential_equation"
-                        }
+                        steps.append(Step("🧮", "الحل العام", str(solution), sp.latex(solution)))
+                        steps.append(Step("✅", "النتيجة", str(solution.rhs)))
+                        
+                        return StepResult(
+                            success=True,
+                            result=str(solution.rhs),
+                            result_str=str(solution.rhs),
+                            steps=steps,
+                            model="differential_equation",
+                            extracted_data={"equation": question}
+                        )
                     
                     elif pattern == r"y''([+-]\d*)y=0":
                         # معادلة من الدرجة الثانية بدون حد y'
                         c = float(match.group(1))
                         
+                        steps.append(Step("🔍", "التحليل", f"معادلة تفاضلية من الدرجة الثانية: y'' + {c}y = 0"))
+                        steps.append(Step("📝", "القانون", "المعادلة المميزة: r² + c = 0"))
+                        
                         diff_eq = sp.Eq(y.diff(x, 2) + c*y, 0)
                         solution = sp.dsolve(diff_eq, y)
                         
-                        steps = [
-                            f"المعادلة: y'' + {c}y = 0",
-                            f"الحل العام: {solution}"
-                        ]
-                        self._log_processing(question, "differential_equation", {"result": str(solution)})
-                        return {
-                            "success": True,
-                            "result": str(solution.rhs),
-                            "full_solution": str(solution),
-                            "steps": steps,
-                            "model": "differential_equation"
-                        }
+                        steps.append(Step("🧮", "الحل العام", str(solution), sp.latex(solution)))
+                        steps.append(Step("✅", "النتيجة", str(solution.rhs)))
+                        
+                        return StepResult(
+                            success=True,
+                            result=str(solution.rhs),
+                            result_str=str(solution.rhs),
+                            steps=steps,
+                            model="differential_equation",
+                            extracted_data={"equation": question}
+                        )
             
             return None
         
@@ -1328,7 +1509,7 @@ class AIEngine:
     
     # ========== قوالب التبسيط والتحليل ==========
     
-    async def template_simplify(self, question: str) -> Optional[Dict]:
+    async def template_simplify(self, question: str) -> Optional[StepResult]:
         """
         قالب تبسيط التعبيرات
         أمثلة: "بسط (x^2 + 2x + 1)", "simplify sin^2(x) + cos^2(x)"
@@ -1350,25 +1531,30 @@ class AIEngine:
                     if expr is None:
                         return None
                     
-                    simplified = sp.simplify(expr)
-                    
                     steps = [
-                        f"التعبير: {expr_str}",
-                        f"بعد التبسيط: {simplified}"
+                        Step("📥", "السؤال", f"تبسيط التعبير: {expr_str}"),
+                        Step("🔍", "التحليل", "تطبيق قواعد التبسيط الجبرية")
                     ]
                     
-                    self._log_processing(question, "simplify", {"result": str(simplified)})
-                    return {
-                        "success": True,
-                        "result": str(simplified),
-                        "steps": steps,
-                        "model": "simplify"
-                    }
+                    simplified = sp.simplify(expr)
+                    
+                    steps.append(Step("🧮", "التبسيط", f"{expr_str} = {simplified}", sp.latex(simplified)))
+                    steps.append(Step("✅", "النتيجة", str(simplified)))
+                    
+                    self._log_processing(question, "simplify", None)
+                    return StepResult(
+                        success=True,
+                        result=simplified,
+                        result_str=str(simplified),
+                        steps=steps,
+                        model="simplify",
+                        extracted_data={"expression": expr_str}
+                    )
                 
                 return await run_with_timeout(calculate_simplify())
         return None
     
-    async def template_expand(self, question: str) -> Optional[Dict]:
+    async def template_expand(self, question: str) -> Optional[StepResult]:
         """
         قالب فك الأقواس
         أمثلة: "فك (x+2)^2", "expand (x+1)(x+2)"
@@ -1390,25 +1576,30 @@ class AIEngine:
                     if expr is None:
                         return None
                     
-                    expanded = sp.expand(expr)
-                    
                     steps = [
-                        f"التعبير: {expr_str}",
-                        f"بعد الفك: {expanded}"
+                        Step("📥", "السؤال", f"فك الأقواس: {expr_str}"),
+                        Step("🔍", "التحليل", "تطبيق خاصية التوزيع")
                     ]
                     
-                    self._log_processing(question, "expand", {"result": str(expanded)})
-                    return {
-                        "success": True,
-                        "result": str(expanded),
-                        "steps": steps,
-                        "model": "expand"
-                    }
+                    expanded = sp.expand(expr)
+                    
+                    steps.append(Step("🧮", "الفك", f"{expr_str} = {expanded}", sp.latex(expanded)))
+                    steps.append(Step("✅", "النتيجة", str(expanded)))
+                    
+                    self._log_processing(question, "expand", None)
+                    return StepResult(
+                        success=True,
+                        result=expanded,
+                        result_str=str(expanded),
+                        steps=steps,
+                        model="expand",
+                        extracted_data={"expression": expr_str}
+                    )
                 
                 return await run_with_timeout(calculate_expand())
         return None
     
-    async def template_factor(self, question: str) -> Optional[Dict]:
+    async def template_factor(self, question: str) -> Optional[StepResult]:
         """
         قالب التحليل إلى عوامل
         أمثلة: "حلل x^2 - 5x + 6", "factor x^2 - 4"
@@ -1430,20 +1621,25 @@ class AIEngine:
                     if expr is None:
                         return None
                     
-                    factored = sp.factor(expr)
-                    
                     steps = [
-                        f"التعبير: {expr_str}",
-                        f"بعد التحليل: {factored}"
+                        Step("📥", "السؤال", f"تحليل التعبير إلى عوامله: {expr_str}"),
+                        Step("🔍", "التحليل", "إيجاد العوامل المشتركة")
                     ]
                     
-                    self._log_processing(question, "factor", {"result": str(factored)})
-                    return {
-                        "success": True,
-                        "result": str(factored),
-                        "steps": steps,
-                        "model": "factor"
-                    }
+                    factored = sp.factor(expr)
+                    
+                    steps.append(Step("🧮", "التحليل", f"{expr_str} = {factored}", sp.latex(factored)))
+                    steps.append(Step("✅", "النتيجة", str(factored)))
+                    
+                    self._log_processing(question, "factor", None)
+                    return StepResult(
+                        success=True,
+                        result=factored,
+                        result_str=str(factored),
+                        steps=steps,
+                        model="factor",
+                        extracted_data={"expression": expr_str}
+                    )
                 
                 return await run_with_timeout(calculate_factor())
         return None
@@ -1513,10 +1709,10 @@ class AIEngine:
         for template_name, template_func in templates_order:
             try:
                 result = await template_func(question)
-                if result and result.get('success'):
+                if result and result.success:
                     # حفظ في الذاكرة
-                    self.memory.set(normalized, result)
-                    return result
+                    self.memory.set(normalized, result.to_dict())
+                    return result.to_dict()
             except Exception as e:
                 logger.error(f"⚠️ Error in {template_name}: {e}")
                 continue
