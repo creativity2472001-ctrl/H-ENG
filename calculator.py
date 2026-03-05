@@ -1,36 +1,96 @@
-# calculator.py - آلة حاسبة علمية متكاملة مع معادلات (نسخة محسّنة نهائية)
+# calculator.py - آلة حاسبة علمية متكاملة للمهندسين (نسخة فائقة)
 import sympy as sp
 from sympy.parsing.sympy_parser import parse_expr, standard_transformations, implicit_multiplication_application, convert_xor
 import math
 import re
 from typing import Union, Optional, List, Dict, Any, Tuple
+from collections import OrderedDict
+import matplotlib.pyplot as plt
+import numpy as np
+import io
+import base64
+from datetime import datetime
 
 # المتغيرات الرمزية
 x, y, z, t = sp.symbols('x y z t')
 
+class LRUCache:
+    """ذاكرة تخزين مؤقت مع حد أقصى (FIFO)"""
+    def __init__(self, capacity: int = 100):
+        self.cache = OrderedDict()
+        self.capacity = capacity
+    
+    def get(self, key: str):
+        if key not in self.cache:
+            return None
+        self.cache.move_to_end(key)
+        return self.cache[key]
+    
+    def put(self, key: str, value):
+        self.cache[key] = value
+        self.cache.move_to_end(key)
+        if len(self.cache) > self.capacity:
+            self.cache.popitem(last=False)
+    
+    def clear(self):
+        self.cache.clear()
+    
+    def __len__(self):
+        return len(self.cache)
+
+class CommandHistory:
+    """سجل الأوامر مع حد أقصى"""
+    def __init__(self, max_size: int = 200):
+        self.history = []
+        self.max_size = max_size
+        self.index = 0
+    
+    def add(self, command: str):
+        self.history.append(command)
+        self.index = len(self.history)
+        if len(self.history) > self.max_size:
+            self.history.pop(0)
+            self.index = len(self.history)
+    
+    def get_previous(self) -> Optional[str]:
+        if self.index > 0:
+            self.index -= 1
+            return self.history[self.index]
+        return None
+    
+    def get_next(self) -> Optional[str]:
+        if self.index < len(self.history) - 1:
+            self.index += 1
+            return self.history[self.index]
+        return None
+    
+    def clear(self):
+        self.history.clear()
+        self.index = 0
+    
+    def get_all(self) -> List[str]:
+        return self.history.copy()
+    
+    def __len__(self):
+        return len(self.history)
+
 class Calculator:
     """
-    آلة حاسبة علمية متكاملة للمهندسين:
-    - العمليات الأساسية (جمع، طرح، ضرب، قسمة، قوى، جذور، مضروب، نسبة مئوية)
-    - دوال مثلثية (sin, cos, tan, cot, sec, csc) مع دعم الدرجات والراديان
-    - دوال زائدية (sinh, cosh, tanh) + دوال عكسية
-    - لوغاريتمات (ln, log, log10) وأسية (exp)
-    - دوال رياضية إضافية: abs, round, floor, ceiling
-    - دوال توافقيات: nCr, nPr
-    - ثوابت: pi, e, oo, I (وحدة تخيلية)
-    - حل معادلات (يدعم متغيرات متعددة)
-    - تبسيط، فك أقواس، تحليل إلى عوامل
-    - ذاكرة (M+, M-, MR, MC)
-    - أرقام عشوائية
-    - تخزين مؤقت للتعبيرات المتكررة
+    آلة حاسبة علمية متكاملة للمهندسين (نسخة فائقة)
+    - جميع العمليات الحسابية والرياضية
+    - دعم الرموز الرياضية والتكامل الرمزي
+    - رسوم بيانية متكاملة
+    - سجل أوامر ذكي مع حد أقصى
+    - تخزين مؤقت متطور
     """
     
-    def __init__(self):
+    def __init__(self, cache_capacity: int = 100, history_max: int = 200):
         self.memory = 0.0
-        self.last_result = 0.0
-        self.cache = {}  # تخزين التعبيرات المحللة مسبقاً
+        self.last_result = None
+        self.cache = LRUCache(capacity=cache_capacity)
+        self.history = CommandHistory(max_size=history_max)
         
-        # البيئة الآمنة لـ sympy - موسعة بالكامل
+        # البيئة الآمنة لـ sympy
         self.local_dict = {
             # متغيرات
             'x': x, 'y': y, 'z': z, 't': t,
@@ -42,6 +102,8 @@ class Calculator:
             'sin': sp.sin, 'cos': sp.cos, 'tan': sp.tan,
             'cot': sp.cot, 'sec': sp.sec, 'csc': sp.csc,
             'asin': sp.asin, 'acos': sp.acos, 'atan': sp.atan,
+            'atan2': sp.atan2,
+            'acot': sp.acot, 'asec': sp.asec, 'acsc': sp.acsc,
             
             # دوال زائدية
             'sinh': sp.sinh, 'cosh': sp.cosh, 'tanh': sp.tanh,
@@ -62,76 +124,251 @@ class Calculator:
             
             # دوال توافقيات
             'factorial': sp.factorial,
-            'binomial': sp.binomial,  # nCr
-            'permutations': lambda n, k: sp.factorial(n) / sp.factorial(n-k),  # nPr تقريبي
+            'binomial': sp.binomial,
+            'permutations': lambda n, k: sp.factorial(n) / sp.factorial(n-k),
             
-            # دوال إحصائية (يمكن توسيعها)
-            'mean': lambda *args: sum(args) / len(args),
-            'std': lambda *args: (sum((x - sum(args)/len(args))**2 for x in args) / len(args))**0.5,
+            # دوال إحصائية
+            'mean': lambda *args: sum(args) / len(args) if args else 0,
+            'median': self._median_helper,
+            'std': lambda *args, sample=True: self._std_helper(*args, sample=sample),
+            'variance': lambda *args, sample=True: self._variance_helper(*args, sample=sample),
+            'sum_sq': lambda *args: sum(x**2 for x in args) if args else 0,
+            
+            # دوال التكامل الرمزي
+            'Integral': sp.Integral,  # عرض رمزي بدون حساب
+            'integrate': sp.integrate,  # حساب التكامل
         }
         
-        # التحويلات لفهم 2x و 2(x+1) و (x+1)(x+2)
         self.transformations = standard_transformations + (implicit_multiplication_application, convert_xor)
     
+    # ========== دوال مساعدة إحصائية ==========
+    def _median_helper(self, *args):
+        if not args:
+            return 0
+        sorted_args = sorted(args)
+        n = len(sorted_args)
+        if n % 2 == 1:
+            return sorted_args[n // 2]
+        return (sorted_args[n//2 - 1] + sorted_args[n//2]) / 2
+    
+    def _variance_helper(self, *args, sample: bool = True):
+        if len(args) < 2:
+            return 0
+        m = sum(args) / len(args)
+        sum_sq = sum((x - m) ** 2 for x in args)
+        return sum_sq / (len(args) - 1) if sample else sum_sq / len(args)
+    
+    def _std_helper(self, *args, sample: bool = True):
+        if len(args) < 2:
+            return 0
+        return self._variance_helper(*args, sample=sample) ** 0.5
+    
+    # ========== تحسين تحويل الدرجات ==========
+    def _convert_degrees(self, expr_str: str) -> str:
+        """تحويل sin(30) إلى sin(30*pi/180) مع تحسينات"""
+        def replace_deg(match):
+            func = match.group(1)
+            num = match.group(2)
+            if num.replace('.', '').replace('-', '').isdigit():
+                return f"{func}({num}*pi/180)"
+            return match.group(0)
+        
+        pattern1 = r'(sin|cos|tan|cot|sec|csc)\((\-?\d+\.?\d*)\)'
+        expr_str = re.sub(pattern1, replace_deg, expr_str)
+        
+        pattern2 = r'(sin|cos|tan|cot|sec|csc)\((\-?\d+\.?\d*)deg\)'
+        expr_str = re.sub(pattern2, replace_deg, expr_str)
+        
+        return expr_str
+    
+    # ========== تحليل التكامل ==========
+    def _parse_integral(self, expr_str: str) -> Optional[Dict]:
+        """تحليل صيغ التكامل المختلفة"""
+        patterns = [
+            # صيغة Integral(x^2, x)
+            (r'Integral\(\s*([^,]+)\s*,\s*([^)]+)\s*\)', 'symbolic_var'),
+            # صيغة Integral(x^2)
+            (r'Integral\(\s*([^)]+)\s*\)', 'symbolic'),
+            # صيغة integrate(x^2, x, 0, 1)
+            (r'integrate\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^)]+)\s*\)', 'definite'),
+            # صيغة integrate(x^2, x)
+            (r'integrate\(\s*([^,]+)\s*,\s*([^)]+)\s*\)', 'indefinite_var'),
+            # صيغة integrate(x^2)
+            (r'integrate\(\s*([^)]+)\s*\)', 'indefinite'),
+        ]
+        
+        for pattern, expr_type in patterns:
+            match = re.search(pattern, expr_str, re.IGNORECASE)
+            if match:
+                groups = match.groups()
+                if expr_type == 'definite':
+                    return {
+                        'type': 'definite',
+                        'expr': groups[0].strip(),
+                        'var': groups[1].strip(),
+                        'lower': groups[2].strip(),
+                        'upper': groups[3].strip()
+                    }
+                elif expr_type in ['indefinite_var', 'symbolic_var']:
+                    return {
+                        'type': expr_type,
+                        'expr': groups[0].strip(),
+                        'var': groups[1].strip()
+                    }
+                else:
+                    return {
+                        'type': expr_type,
+                        'expr': groups[0].strip()
+                    }
+        return None
+    
     def _parse_expr(self, expr_str: str, use_cache: bool = True):
-        """
-        تحويل النص إلى تعبير SymPy مع دعم الكاش.
-        يدعم الدرجات تلقائياً (مثل sin(30deg))
-        """
+        """تحويل النص إلى تعبير SymPy"""
         if not expr_str:
             raise ValueError("التعبير فارغ")
         
-        # التحقق من الكاش
-        cache_key = expr_str
-        if use_cache and cache_key in self.cache:
-            return self.cache[cache_key]
+        if use_cache:
+            cached = self.cache.get(expr_str)
+            if cached is not None:
+                return cached
         
-        # معالجة الدرجات: تحويل sin(30) إلى sin(30*pi/180)
-        def convert_degrees(match):
-            func = match.group(1)
-            num = match.group(2)
-            return f"{func}({num}*pi/180)"
-        
-        # البحث عن أنماط مثل sin(30), cos(45), tan(60)
-        pattern = r'(sin|cos|tan|cot|sec|csc)\((\d+(?:\.\d+)?)\)'
-        expr_str = re.sub(pattern, convert_degrees, expr_str)
-        
-        # البحث عن أنماط مثل sin(30deg), cos(45deg)
-        pattern_deg = r'(sin|cos|tan|cot|sec|csc)\((\d+(?:\.\d+)?)deg\)'
-        expr_str = re.sub(pattern_deg, convert_degrees, expr_str)
-        
-        # استبدال ! بـ factorial
+        expr_str = self._convert_degrees(expr_str)
         expr_str = re.sub(r'(\d+)!', r'factorial(\1)', expr_str)
         
         try:
-            # استخدام parse_expr مع التحويلات
             expr = parse_expr(
                 expr_str,
                 local_dict=self.local_dict,
                 transformations=self.transformations,
+                global_dict={},
                 evaluate=True
             )
             
-            # تخزين في الكاش
             if use_cache:
-                self.cache[cache_key] = expr
+                self.cache.put(expr_str, expr)
             
             return expr
         except Exception as e:
             raise ValueError(f"تعبير غير صالح: {e}")
     
-    def clear_cache(self):
-        """مسح الذاكرة المؤقتة للتعبيرات"""
-        self.cache.clear()
+    # ========== دوال الرسم البياني ==========
+    def plot(self, expression: str, var: str = 'x', 
+             limits: Tuple[float, float] = (-10, 10), 
+             points: int = 1000,
+             show: bool = False,
+             title: str = None) -> Optional[str]:
+        """
+        رسم بياني لدالة
+        إذا show=False: يرجع base64 image string
+        إذا show=True: يعرض النافذة مباشرة
+        """
+        try:
+            expr = self._parse_expr(expression)
+            var_sym = self.local_dict.get(var, sp.Symbol(var))
+            
+            # تحويل الدالة إلى numpy function
+            f = sp.lambdify(var_sym, expr, modules=['numpy', 'sympy'])
+            
+            # إنشاء نقاط الرسم
+            x_vals = np.linspace(limits[0], limits[1], points)
+            y_vals = f(x_vals)
+            
+            # إنشاء الشكل
+            plt.figure(figsize=(10, 6))
+            plt.plot(x_vals, y_vals, 'b-', linewidth=2)
+            plt.grid(True, alpha=0.3)
+            plt.xlabel(f'${var}$')
+            plt.ylabel(f'${sp.latex(expr)}$')
+            plt.title(title or f'${sp.latex(expr)}$')
+            plt.axhline(y=0, color='k', linewidth=0.5)
+            plt.axvline(x=0, color='k', linewidth=0.5)
+            
+            if show:
+                plt.show()
+                return None
+            else:
+                # تحويل إلى base64
+                buf = io.BytesIO()
+                plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+                buf.seek(0)
+                img_str = base64.b64encode(buf.read()).decode('utf-8')
+                plt.close()
+                return img_str
+                
+        except Exception as e:
+            return f"خطأ في الرسم: {e}"
+    
+    def plot_multiple(self, expressions: List[str], var: str = 'x',
+                      limits: Tuple[float, float] = (-10, 10),
+                      labels: List[str] = None,
+                      show: bool = False) -> Optional[str]:
+        """رسم عدة دوال في نفس الشكل"""
+        try:
+            var_sym = self.local_dict.get(var, sp.Symbol(var))
+            x_vals = np.linspace(limits[0], limits[1], 1000)
+            
+            plt.figure(figsize=(10, 6))
+            colors = ['b', 'r', 'g', 'c', 'm', 'y', 'k']
+            
+            for i, expr_str in enumerate(expressions):
+                expr = self._parse_expr(expr_str)
+                f = sp.lambdify(var_sym, expr, modules=['numpy', 'sympy'])
+                y_vals = f(x_vals)
+                
+                color = colors[i % len(colors)]
+                label = labels[i] if labels and i < len(labels) else f'${sp.latex(expr)}$'
+                plt.plot(x_vals, y_vals, color=color, linewidth=2, label=label)
+            
+            plt.grid(True, alpha=0.3)
+            plt.xlabel(f'${var}$')
+            plt.ylabel('$f(' + var + ')$')
+            plt.legend()
+            plt.axhline(y=0, color='k', linewidth=0.5)
+            plt.axvline(x=0, color='k', linewidth=0.5)
+            
+            if show:
+                plt.show()
+                return None
+            else:
+                buf = io.BytesIO()
+                plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+                buf.seek(0)
+                img_str = base64.b64encode(buf.read()).decode('utf-8')
+                plt.close()
+                return img_str
+                
+        except Exception as e:
+            return f"خطأ في الرسم: {e}"
+    
+    # ========== دوال التكامل الرمزي ==========
+    def integral_symbolic(self, expression: str, var: str = 'x') -> str:
+        """عرض التكامل بشكل رمزي بدون حساب"""
+        try:
+            expr = self._parse_expr(expression)
+            var_sym = self.local_dict.get(var, sp.Symbol(var))
+            integral = sp.Integral(expr, var_sym)
+            return str(integral)
+        except Exception as e:
+            return f"خطأ: {e}"
     
     # ========== العمليات الأساسية ==========
-    def calculate(self, expression: str) -> Union[float, complex]:
+    def calculate(self, expression: str) -> Union[float, complex, str]:
         """حساب قيمة تعبير رقمي"""
-        expr = self._parse_expr(expression)
-        result = expr.evalf()
-        return complex(result) if result.has(sp.I) else float(result)
+        try:
+            self.history.add(expression)
+            expr = self._parse_expr(expression)
+            result = expr.evalf()
+            
+            if result.has(sp.I):
+                return complex(result)
+            elif result.is_number:
+                return float(result)
+            else:
+                return str(result)
+        except Exception as e:
+            return f"خطأ: {e}"
     
-    # ========== الدوال المثلثية مع دعم الدرجات ==========
+    # ========== الدوال المثلثية ==========
     def sin(self, angle: float, unit: str = 'deg') -> float:
         if unit == 'deg':
             angle = math.radians(angle)
@@ -147,40 +384,44 @@ class Calculator:
             angle = math.radians(angle)
         return math.tan(angle)
     
-    # ========== دوال رياضية إضافية ==========
+    def atan2(self, y: float, x: float, unit: str = 'deg') -> float:
+        result = math.atan2(y, x)
+        return math.degrees(result) if unit == 'deg' else result
+    
+    # ========== دوال إحصائية ==========
+    def mean(self, *args) -> float:
+        return sum(args) / len(args) if args else 0
+    
+    def median(self, *args) -> float:
+        return self._median_helper(*args)
+    
+    def variance(self, *args, sample: bool = True) -> float:
+        return self._variance_helper(*args, sample=sample)
+    
+    def std(self, *args, sample: bool = True) -> float:
+        return self._std_helper(*args, sample=sample)
+    
+    def sum_of_squares(self, *args) -> float:
+        return sum(x**2 for x in args) if args else 0
+    
+    # ========== دوال توافقيات ==========
     def nCr(self, n: int, r: int) -> int:
-        """عدد التوافيق"""
         if r > n:
             return 0
         return math.comb(n, r)
     
     def nPr(self, n: int, r: int) -> int:
-        """عدد التباديل"""
         if r > n:
             return 0
         return math.perm(n, r)
     
-    def gcd(self, a: int, b: int) -> int:
-        """القاسم المشترك الأكبر"""
-        return math.gcd(a, b)
-    
-    def lcm(self, a: int, b: int) -> int:
-        """المضاعف المشترك الأصغر"""
-        return abs(a * b) // math.gcd(a, b) if a and b else 0
-    
-    # ========== حل المعادلات (محسّن) ==========
+    # ========== حل المعادلات ==========
     def solve_equation(self, equation: str) -> str:
-        """
-        حل معادلة نصية - تدعم متغيرات متعددة وأنظمة معادلات
-        أمثلة:
-        - x+5=10
-        - x**2 + y**2 = 25, x - y = 1
-        """
+        """حل معادلة نصية"""
         try:
-            # فصل المعادلات إذا كان هناك عدة معادلات
+            self.history.add(equation)
             equations = []
             if ',' in equation or ';' in equation:
-                # نظام معادلات
                 parts = re.split(r'[,;]', equation)
                 for part in parts:
                     part = part.strip()
@@ -195,7 +436,6 @@ class Calculator:
                         expr = self._parse_expr(part)
                         equations.append(sp.Eq(expr, 0))
             else:
-                # معادلة واحدة
                 if '=' in equation:
                     left, right = equation.split('=')
                     left_expr = self._parse_expr(left.strip())
@@ -205,20 +445,17 @@ class Calculator:
                     expr = self._parse_expr(equation)
                     equations = [sp.Eq(expr, 0)]
             
-            # استخراج جميع المتغيرات
             all_vars = set()
             for eq in equations:
                 all_vars.update(eq.free_symbols)
             all_vars = list(all_vars)
             
             if not all_vars:
-                # معادلة بدون متغيرات
                 if all(eq.lhs == eq.rhs for eq in equations):
                     return "المعادلة صحيحة دائماً"
                 else:
                     return "المعادلة خاطئة"
             
-            # حل النظام
             if len(equations) == 1:
                 solutions = sp.solve(equations[0], all_vars[0], dict=True)
             else:
@@ -227,78 +464,122 @@ class Calculator:
             if not solutions:
                 return "لا يوجد حل"
             
-            # تنسيق الحلول
             if isinstance(solutions, list) and all(isinstance(s, dict) for s in solutions):
-                # عدة حلول
                 result = []
                 for i, sol in enumerate(solutions):
                     sol_str = ", ".join(f"{k} = {v}" for k, v in sol.items())
                     result.append(f"الحل {i+1}: {sol_str}")
                 return "\n".join(result)
             elif isinstance(solutions, dict):
-                # حل وحيد لمتغيرات متعددة
                 return ", ".join(f"{k} = {v}" for k, v in solutions.items())
             else:
-                # حل وحيد لمتغير واحد
                 return f"{all_vars[0]} = {solutions}"
                 
         except Exception as e:
             return f"خطأ في حل المعادلة: {e}"
     
-    # ========== دوال جبرية متقدمة ==========
+    # ========== دوال جبرية ==========
     def simplify(self, expression: str) -> str:
-        """تبسيط تعبير"""
-        expr = self._parse_expr(expression)
-        return str(sp.simplify(expr))
+        try:
+            expr = self._parse_expr(expression)
+            return str(sp.simplify(expr))
+        except Exception as e:
+            return f"خطأ: {e}"
     
     def expand(self, expression: str) -> str:
-        """فك الأقواس"""
-        expr = self._parse_expr(expression)
-        return str(sp.expand(expr))
+        try:
+            expr = self._parse_expr(expression)
+            return str(sp.expand(expr))
+        except Exception as e:
+            return f"خطأ: {e}"
     
     def factor(self, expression: str) -> str:
-        """تحليل إلى عوامل"""
-        expr = self._parse_expr(expression)
-        return str(sp.factor(expr))
+        try:
+            expr = self._parse_expr(expression)
+            return str(sp.factor(expr))
+        except Exception as e:
+            return f"خطأ: {e}"
     
-    # ========== تفاضل وتكامل (للتوافق مع التوسعات المستقبلية) ==========
+    # ========== تفاضل ==========
     def diff(self, expression: str, var: str = 'x', order: int = 1) -> str:
-        """مشتقة"""
-        expr = self._parse_expr(expression)
-        var_sym = self.local_dict.get(var, sp.Symbol(var))
-        result = sp.diff(expr, var_sym, order)
-        return str(sp.simplify(result))
+        try:
+            expr = self._parse_expr(expression)
+            var_sym = self.local_dict.get(var, sp.Symbol(var))
+            result = sp.diff(expr, var_sym, order)
+            return str(sp.simplify(result))
+        except Exception as e:
+            return f"خطأ: {e}"
     
-    def integrate(self, expression: str, var: str = 'x', 
-                  lower: Optional[str] = None, upper: Optional[str] = None) -> str:
-        """تكامل"""
-        expr = self._parse_expr(expression)
-        var_sym = self.local_dict.get(var, sp.Symbol(var))
-        
-        if lower is not None and upper is not None:
-            lower_expr = self._parse_expr(lower)
-            upper_expr = self._parse_expr(upper)
-            result = sp.integrate(expr, (var_sym, lower_expr, upper_expr))
-        else:
-            result = sp.integrate(expr, var_sym)
-        
-        return str(result)
+    # ========== تكامل محسّن ==========
+    def integrate(self, expression: str, 
+                  lower: Optional[str] = None, 
+                  upper: Optional[str] = None,
+                  var: str = 'x') -> str:
+        """تكامل مع دعم صيغ متعددة"""
+        try:
+            # تحقق من صيغة Integral/integrate
+            integral_info = self._parse_integral(expression)
+            if integral_info:
+                if integral_info['type'] in ['definite', 'indefinite_var', 'indefinite']:
+                    expr = self._parse_expr(integral_info['expr'])
+                    
+                    if integral_info['type'] == 'definite':
+                        var_sym = self.local_dict.get(integral_info['var'], sp.Symbol(integral_info['var']))
+                        lower_val = sp.sympify(integral_info['lower'])
+                        upper_val = sp.sympify(integral_info['upper'])
+                        result = sp.integrate(expr, (var_sym, lower_val, upper_val))
+                    elif integral_info['type'] == 'indefinite_var':
+                        var_sym = self.local_dict.get(integral_info['var'], sp.Symbol(integral_info['var']))
+                        result = sp.integrate(expr, var_sym)
+                    else:  # indefinite
+                        result = sp.integrate(expr)
+                    return str(result)
+                
+                elif integral_info['type'] == 'symbolic':
+                    # عرض رمزي بدون حساب
+                    expr = self._parse_expr(integral_info['expr'])
+                    integral = sp.Integral(expr)
+                    return str(integral)
+                
+                elif integral_info['type'] == 'symbolic_var':
+                    expr = self._parse_expr(integral_info['expr'])
+                    var_sym = self.local_dict.get(integral_info['var'], sp.Symbol(integral_info['var']))
+                    integral = sp.Integral(expr, var_sym)
+                    return str(integral)
+            
+            # صيغ أخرى
+            if lower is not None and upper is not None:
+                expr = self._parse_expr(expression)
+                var_sym = self.local_dict.get(var, sp.Symbol(var))
+                lower_val = sp.sympify(lower)
+                upper_val = sp.sympify(upper)
+                result = sp.integrate(expr, (var_sym, lower_val, upper_val))
+            else:
+                expr = self._parse_expr(expression)
+                var_sym = self.local_dict.get(var, sp.Symbol(var))
+                result = sp.integrate(expr, var_sym)
+            
+            return str(result)
+        except Exception as e:
+            return f"خطأ في التكامل: {e}"
     
+    # ========== نهايات ==========
     def limit(self, expression: str, var: str = 'x', approach: str = '0') -> str:
-        """نهاية"""
-        expr = self._parse_expr(expression)
-        var_sym = self.local_dict.get(var, sp.Symbol(var))
-        
-        # معالجة الرموز الخاصة
-        if approach in ['oo', 'infinity', '∞']:
-            approach_val = sp.oo
-        elif approach in ['-oo', '-infinity', '-∞']:
-            approach_val = -sp.oo
-        else:
-            approach_val = self._parse_expr(approach)
-        
-        result = sp.limit(expr, var_sym, approach_val)
-        return str(result)
+        try:
+            expr = self._parse_expr(expression)
+            var_sym = self.local_dict.get(var, sp.Symbol(var))
+            
+            if approach in ['oo', 'infinity', '∞']:
+                approach_val = sp.oo
+            elif approach in ['-oo', '-infinity', '-∞']:
+                approach_val = -sp.oo
+            else:
+                approach_val = sp.sympify(approach)
+            
+            result = sp.limit(expr, var_sym, approach_val)
+            return str(result)
+        except Exception as e:
+            return f"خطأ في النهاية: {e}"
     
     # ========== الذاكرة ==========
     def mc(self):
@@ -321,67 +602,48 @@ class Calculator:
         import random
         return random.uniform(a, b)
     
-    # ========== دوال إحصائية بسيطة ==========
-    def mean(self, *args) -> float:
-        """متوسط حسابي"""
-        if not args:
-            return 0
-        return sum(args) / len(args)
+    # ========== إدارة الكاش والسجل ==========
+    def clear_cache(self):
+        self.cache.clear()
     
-    def median(self, *args) -> float:
-        """وسيط"""
-        if not args:
-            return 0
-        sorted_args = sorted(args)
-        n = len(sorted_args)
-        if n % 2 == 1:
-            return sorted_args[n // 2]
-        return (sorted_args[n//2 - 1] + sorted_args[n//2]) / 2
+    def get_cache_size(self) -> int:
+        return len(self.cache)
     
-    def std(self, *args) -> float:
-        """انحراف معياري"""
-        if len(args) < 2:
-            return 0
-        m = self.mean(*args)
-        variance = sum((x - m) ** 2 for x in args) / (len(args) - 1)
-        return variance ** 0.5
+    def get_history(self, limit: int = None) -> List[str]:
+        history = self.history.get_all()
+        if limit:
+            return history[-limit:]
+        return history
+    
+    def clear_history(self):
+        self.history.clear()
+    
+    def get_stats(self) -> Dict:
+        """إحصائيات المحرك"""
+        return {
+            'cache_size': len(self.cache),
+            'history_size': len(self.history),
+            'memory': self.memory,
+            'last_result': str(self.last_result) if self.last_result else None
+        }
 
 
-# ========== للاختبار المباشر (اختياري) ==========
-if __name__ == "__main__":
-    calc = Calculator()
-    print("="*60)
-    print("آلة حاسبة علمية متكاملة (نسخة اختبار)")
-    print("="*60)
-    
-    # اختبارات سريعة
-    test_expressions = [
-        "2+2",
-        "sin(30)",  # 0.5
-        "sin(pi/2)",  # 1
-        "cos(60)",  # 0.5
-        "5!",
-        "2x+3 when x=5",
-        "solve: x^2 - 5x + 6 = 0",
-        "solve: x^2 + y^2 = 25, x - y = 1",
-        "simplify: (x^2-1)/(x-1)",
-        "expand: (x+2)^2",
-        "factor: x^2-5x+6",
-    ]
-    
-    for expr in test_expressions:
-        print(f"\n>>> {expr}")
-        try:
-            if expr.startswith("solve:"):
-                result = calc.solve_equation(expr[6:])
-            elif expr.startswith("simplify:"):
-                result = calc.simplify(expr[9:])
-            elif expr.startswith("expand:"):
-                result = calc.expand(expr[7:])
-            elif expr.startswith("factor:"):
-                result = calc.factor(expr[7:])
-            else:
-                result = calc.calculate(expr)
-            print(f"= {result}")
-        except Exception as e:
-            print(f"خطأ: {e}")
+# ========== دوال مساعدة للتوافق ==========
+def mean(*args):
+    return Calculator().mean(*args)
+
+def median(*args):
+    return Calculator().median(*args)
+
+def std(*args, sample=True):
+    return Calculator().std(*args, sample=sample)
+
+def variance(*args, sample=True):
+    return Calculator().variance(*args, sample=sample)
+
+def sum_of_squares(*args):
+    return Calculator().sum_of_squares(*args)
+
+def plot(expr: str, limits=(-10, 10), show=False):
+    """دالة مساعدة للرسم"""
+    return Calculator().plot(expr, limits=limits, show=show)
