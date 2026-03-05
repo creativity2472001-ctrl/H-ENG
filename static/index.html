@@ -687,7 +687,7 @@
             }
         }
 
-        // ✅ إرسال السؤال إلى الخادم - تم التعديل هنا
+        // ✅ إرسال السؤال إلى الخادم - المعدل للتوافق
         async function sendQuestion() {
             const question = document.getElementById('questionInput').value.trim();
             const sendButton = document.getElementById('sendButton');
@@ -713,13 +713,13 @@
             `;
             
             try {
-                // ✅ التعديل: استخدم /calculate و { expression: question }
+                // ✅ استخدام /calculate مع expression
                 const response = await fetch('/calculate', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ expression: question })  // ✅ تم التعديل
+                    body: JSON.stringify({ expression: question })
                 });
                 
                 const data = await response.json();
@@ -749,20 +749,6 @@
         document.getElementById('questionInput').addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
                 sendQuestion();
-            }
-        });
-
-        // التحقق من صحة الاتصال بالخادم عند التحميل
-        window.addEventListener('load', async function() {
-            try {
-                const response = await fetch('/health');
-                const data = await response.json();
-                
-                if (data.status === 'healthy') {
-                    console.log('✅ الخادم يعمل بنجاح');
-                }
-            } catch (error) {
-                console.warn('⚠️ لا يمكن الاتصال بالخادم');
             }
         });
     </script>
