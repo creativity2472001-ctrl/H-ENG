@@ -44,7 +44,8 @@ class Calculator:
             # استيراد sympy هنا لتجنب الاعتماد عليه إذا لم يكن مثبتاً
             from sympy import symbols, Eq, solve, sympify
             
-            x = symbols('x')
+            # تعريف x كعدد حقيقي (هذا هو التعديل الوحيد)
+            x = symbols('x', real=True)
             left, right = modified_equation.split('=')
             
             # تحويل 2x إلى 2*x
