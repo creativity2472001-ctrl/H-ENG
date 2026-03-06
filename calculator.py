@@ -45,9 +45,11 @@ class Calculator:
                     return f"abs({match.group(1)})"
                 
                 modified_equation = re.sub(pattern, replace_abs, modified_equation)
+                # ===== تعديل إضافي لـ SymPy ليتعامل مع الأعداد الحقيقية =====
+                modified_equation = modified_equation.replace('abs(', 're(Abs(')
             
             # استيراد sympy هنا لتجنب الاعتماد عليه إذا لم يكن مثبتاً
-            from sympy import symbols, Eq, solve, sympify
+            from sympy import symbols, Eq, solve, sympify, Abs, re
             
             x = symbols('x')
             left, right = modified_equation.split('=')
