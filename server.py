@@ -1,7 +1,7 @@
 # server.py - خادم الويب المتكامل (نسخة نهائية)
 # ============================================================================
 # هذا الملف يدمج جميع القوالب الجديدة مع النظام القديم
-# الإصدار: 3.2.1 - نهائي ومستقر - مع دعم نظام 3×3 وتقريب الأعداد وإصلاح القيمة المطلقة
+# الإصدار: 3.3.0 - نهائي ومستقر - مع دعم نظام 3×3 الكامل
 # ============================================================================
 
 from fastapi import FastAPI
@@ -37,7 +37,7 @@ from algebra_part3 import AdvancedAlgebraSolver
 app = FastAPI(
     title="الآلة الحاسبة المتكاملة",
     description="نظام حلول رياضية متكامل بـ 152 قالباً",
-    version="3.2.1"
+    version="3.3.0"
 )
 
 # ===== إعداد CORS =====
@@ -190,6 +190,105 @@ def extract_coefficients_from_equation(eq: str) -> Tuple[Optional[float], Option
     except Exception as e:
         logger.error(f"خطأ في تحليل المعادلة '{eq}': {str(e)}")
         return None, None, None
+
+def extract_coefficients_3x3(eq: str) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
+    """
+    تحليل معادلة خطية بثلاثة متغيرات إلى المعاملات a, b, c, d
+    مثال: "x + y + z = 6" -> (1, 1, 1, 6)
+    """
+    try:
+        # تنظيف النص
+        eq = eq.replace(' ', '').lower()
+        
+        # فصل الطرفين
+        if '=' not in eq:
+            return None, None, None, None
+        
+        left, right = eq.split('=')
+        
+        # تحويل الطرف الأيمن إلى عدد
+        try:
+            d = float(right)
+        except ValueError:
+            return None, None, None, None
+        
+        # تهيئة المعاملات
+        a = 0.0
+        b = 0.0
+        c = 0.0
+        
+        # استخراج معامل x
+        x_patterns = [
+            r'([+-]?\d*\.?\d*)\*?x(?![a-zA-Z])',
+            r'x\*([+-]?\d*\.?\d+)',
+            r'([+-]?)x(?!\d)'
+        ]
+        
+        for pattern in x_patterns:
+            x_match = re.search(pattern, left)
+            if x_match:
+                coeff = x_match.group(1)
+                if coeff == '' or coeff == '+':
+                    a = 1.0
+                elif coeff == '-':
+                    a = -1.0
+                else:
+                    try:
+                        a = float(coeff)
+                    except ValueError:
+                        continue
+                break
+        
+        # استخراج معامل y
+        y_patterns = [
+            r'([+-]?\d*\.?\d*)\*?y(?![a-zA-Z])',
+            r'y\*([+-]?\d*\.?\d+)',
+            r'([+-]?)y(?!\d)'
+        ]
+        
+        for pattern in y_patterns:
+            y_match = re.search(pattern, left)
+            if y_match:
+                coeff = y_match.group(1)
+                if coeff == '' or coeff == '+':
+                    b = 1.0
+                elif coeff == '-':
+                    b = -1.0
+                else:
+                    try:
+                        b = float(coeff)
+                    except ValueError:
+                        continue
+                break
+        
+        # استخراج معامل z
+        z_patterns = [
+            r'([+-]?\d*\.?\d*)\*?z(?![a-zA-Z])',
+            r'z\*([+-]?\d*\.?\d+)',
+            r'([+-]?)z(?!\d)'
+        ]
+        
+        for pattern in z_patterns:
+            z_match = re.search(pattern, left)
+            if z_match:
+                coeff = z_match.group(1)
+                if coeff == '' or coeff == '+':
+                    c = 1.0
+                elif coeff == '-':
+                    c = -1.0
+                else:
+                    try:
+                        c = float(coeff)
+                    except ValueError:
+                        continue
+                break
+        
+        logger.info(f"تم تحليل المعادلة '{eq}' إلى: a={a}, b={b}, c={c}, d={d}")
+        return a, b, c, d
+        
+    except Exception as e:
+        logger.error(f"خطأ في تحليل المعادلة '{eq}': {str(e)}")
+        return None, None, None, None
 
 def parse_system_equations(expr: str) -> Optional[Dict[str, Any]]:
     """
@@ -435,39 +534,52 @@ def solve_system_3x3(eq1: str, eq2: str, eq3: str) -> Dict[str, Any]:
     try:
         logger.info(f"محاولة حل نظام 3×3: {eq1}, {eq2}, {eq3}")
         
-        # قائمة التوابع للمحاولة بالترتيب
-        solvers = [
-            ("template_27_system_3x3_unique", getattr(solver1, 'template_27_system_3x3_unique', None)),
-            ("template_05_system_3x3", getattr(solver1, 'template_05_system_3x3', None)),
-            ("template_28_system_3x3_gaussian", getattr(solver1, 'template_28_system_3x3_gaussian', None))
-        ]
+        # تحليل المعادلات إلى معاملات
+        a1, b1, c1, d1 = extract_coefficients_3x3(eq1)
+        a2, b2, c2, d2 = extract_coefficients_3x3(eq2)
+        a3, b3, c3, d3 = extract_coefficients_3x3(eq3)
         
-        for solver_name, solver_func in solvers:
-            if solver_func is None:
-                logger.warning(f"{solver_name} غير موجودة")
-                continue
-                
-            try:
-                logger.info(f"محاولة استخدام {solver_name}")
-                result = solver_func(eq1, eq2, eq3)
-                
-                if result:
-                    formatted = format_system_result(result)
-                    if formatted and formatted != "لا يوجد حل":
-                        return {
-                            "success": True,
-                            "result": formatted,
-                            "method": solver_name
-                        }
-            except Exception as e:
-                logger.warning(f"فشل {solver_name}: {e}")
-                continue
+        # التحقق من صحة المعاملات
+        if None in [a1, b1, c1, d1, a2, b2, c2, d2, a3, b3, c3, d3]:
+            return {
+                "success": False,
+                "error": "فشل تحليل المعادلات. تأكد من الصيغة: مثال: x + y + z = 6"
+            }
         
-        # إذا وصلنا إلى هنا، جميع المحاولات فشلت
-        return {
-            "success": False,
-            "error": "نظام المعادلات 3×3 قيد التطوير - سيتم إضافته قريباً"
+        logger.info(f"المعاملات: ({a1},{b1},{c1},{d1}), ({a2},{b2},{c2},{d2}), ({a3},{b3},{c3},{d3})")
+        
+        # حساب المحدد الرئيسي باستخدام قاعدة Sarrus
+        det_A = (a1*b2*c3 + b1*c2*a3 + c1*a2*b3) - (c1*b2*a3 + b1*a2*c3 + a1*c2*b3)
+        
+        if abs(det_A) < 1e-10:
+            return {
+                "success": False,
+                "error": "النظام ليس له حل وحيد (المحدد = 0)"
+            }
+        
+        # حساب محدد x (استبدال عمود x بالثوابت)
+        det_x = (d1*b2*c3 + b1*c2*d3 + c1*d2*b3) - (c1*b2*d3 + b1*d2*c3 + d1*c2*b3)
+        
+        # حساب محدد y (استبدال عمود y بالثوابت)
+        det_y = (a1*d2*c3 + d1*c2*a3 + c1*a2*d3) - (c1*d2*a3 + d1*a2*c3 + a1*c2*d3)
+        
+        # حساب محدد z (استبدال عمود z بالثوابت)
+        det_z = (a1*b2*d3 + b1*d2*a3 + d1*a2*b3) - (d1*b2*a3 + b1*a2*d3 + a1*d2*b3)
+        
+        # الحلول
+        x = det_x / det_A
+        y = det_y / det_A
+        z = det_z / det_A
+        
+        logger.info(f"الحل: x={x}, y={y}, z={z}")
+        
+        # تنسيق النتيجة
+        result = {
+            "success": True,
+            "result": f"x = {format_number(x)}, y = {format_number(y)}, z = {format_number(z)}"
         }
+        
+        return result
         
     except Exception as e:
         logger.error(f"خطأ في حل نظام 3×3: {str(e)}")
@@ -925,10 +1037,10 @@ async def health_check():
     """التحقق من صحة الخادم"""
     return {
         "status": "healthy",
-        "version": "3.2.1",
+        "version": "3.3.0",
         "templates": 152,
         "parts": ["part1 (1-52)", "part2 (53-102)", "part3 (103-152)"],
-        "features": ["القيمة المطلقة", "نظام 2×2", "نظام 3×3 (قيد التطوير)", "تقريب الأعداد"]
+        "features": ["القيمة المطلقة", "نظام 2×2", "نظام 3×3", "تقريب الأعداد"]
     }
 
 # ===== تشغيل الخادم =====
@@ -936,7 +1048,7 @@ if __name__ == "__main__":
     print("=" * 70)
     print("🚀 بسم الله الرحمن الرحيم")
     print("=" * 70)
-    print("🧮 تشغيل خادم الويب المتكامل - النسخة النهائية v3.2.1")
+    print("🧮 تشغيل خادم الويب المتكامل - النسخة النهائية v3.3.0")
     print("=" * 70)
     print(f"📍 العنوان المحلي: http://127.0.0.1:8000")
     print(f"🌐 العنوان الشبكي: http://localhost:8000")
@@ -950,8 +1062,8 @@ if __name__ == "__main__":
     print("   ✅ دعم القيمة المطلقة |x| في المعادلات")
     print("   ✅ تقريب الأعداد العشرية (1.234 → 1.23)")
     print("   ✅ نظام 2×2 يعمل بكفاءة")
+    print("   ✅ نظام 3×3 يعمل الآن بكفاءة")
     print("   ✅ إصلاح خطأ عرض رسائل الخطأ")
-    print("   ⚠️ نظام 3×3 قيد التطوير")
     print("=" * 70)
     print("🔍 نقاط النهاية المتاحة:")
     print("   ✅ POST /calculate - الحسابات العامة")
@@ -963,13 +1075,14 @@ if __name__ == "__main__":
     print("   ✅ GET  /health - فحص الصحة")
     print("=" * 70)
     print("📝 أمثلة للاستخدام:")
-    print("   • [2*x + 3*y = 8, 3*x - y = 1]  → x = 1, y = 2")
-    print("   • |2*x - 5| = 7                  → x = -1, x = 6")
-    print("   • x^2 - 5*x + 6 = 0             → x = [2, 3]")
-    print("   • sin(30)                        → 0.5")
-    print("   • log(x, 2) + log(x-2, 2) = 3    → x = 4")
+    print("   • [2*x + 3*y = 8, 3*x - y = 1]        → x = 1, y = 2")
+    print("   • [x + y + z = 6, 2*x - y + z = 3, x + 2*y - z = 2] → x = 1, y = 2, z = 3")
+    print("   • |2*x - 5| = 7                        → x = -1, x = 6")
+    print("   • x^2 - 5*x + 6 = 0                   → x = [2, 3]")
+    print("   • sin(30)                              → 0.5")
+    print("   • log(x, 2) + log(x-2, 2) = 3          → x = 4")
     print("=" * 70)
-    print("✅ النظام جاهز للعمل - جميع النتائج مفهومة للمستخدم")
+    print("✅ النظام جاهز للعمل - جميع الأنظمة تعمل بكفاءة")
     print("=" * 70)
     
     # تشغيل الخادم
