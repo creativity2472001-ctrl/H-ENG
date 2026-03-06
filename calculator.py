@@ -46,10 +46,11 @@ class Calculator:
                 
                 modified_equation = re.sub(pattern, replace_abs, modified_equation)
                 # ===== تعديل إضافي لـ SymPy ليتعامل مع الأعداد الحقيقية =====
-                modified_equation = modified_equation.replace('abs(', 're(Abs(')
+                modified_equation = modified_equation.replace('abs(', 'sympy_re(Abs(')
             
             # استيراد sympy هنا لتجنب الاعتماد عليه إذا لم يكن مثبتاً
-            from sympy import symbols, Eq, solve, sympify, Abs, re
+            from sympy import symbols, Eq, solve, sympify, Abs
+            from sympy import re as sympy_re  # استيراد re من sympy باسم مختلف
             
             x = symbols('x')
             left, right = modified_equation.split('=')
