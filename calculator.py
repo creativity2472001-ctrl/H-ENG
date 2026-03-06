@@ -34,15 +34,17 @@ class Calculator:
             if '=' not in equation:
                 return "المعادلة يجب أن تحتوي على علامة ="
             
-            # ===== إضافة دعم صيغة القيمة المطلقة |x| =====
-            # تحويل |x| إلى abs(x) مع الحفاظ على الصيغة الأصلية
+            # ===== إضافة دعم صيغة القيمة المطلقة |x| باستخدام regex =====
             modified_equation = equation
             if '|' in modified_equation:
-                # استبدال كل | بـ abs( وإغلاق الأقواس في النهاية
-                count_bars = modified_equation.count('|')
-                if count_bars % 2 == 0:  # عدد زوجي من | 
-                    modified_equation = modified_equation.replace('|', 'abs(')
-                    modified_equation = modified_equation + ')' * (count_bars // 2)
+                import re
+                # نمط للبحث عن |تعبير|
+                pattern = r'\|([^|]+)\|'
+                
+                def replace_abs(match):
+                    return f"abs({match.group(1)})"
+                
+                modified_equation = re.sub(pattern, replace_abs, modified_equation)
             
             # استيراد sympy هنا لتجنب الاعتماد عليه إذا لم يكن مثبتاً
             from sympy import symbols, Eq, solve, sympify
