@@ -1,7 +1,7 @@
 # server.py - خادم الويب المتكامل (نسخة نهائية)
 # ============================================================================
 # هذا الملف يدمج جميع القوالب الجديدة مع النظام القديم
-# الإصدار: 3.1.0 - نهائي ومستقر - مع تنسيق النتائج بشكل مفهوم
+# الإصدار: 3.2.0 - نهائي ومستقر - مع دعم نظام 3×3 وتقريب الأعداد
 # ============================================================================
 
 from fastapi import FastAPI
@@ -37,7 +37,7 @@ from algebra_part3 import AdvancedAlgebraSolver
 app = FastAPI(
     title="الآلة الحاسبة المتكاملة",
     description="نظام حلول رياضية متكامل بـ 152 قالباً",
-    version="3.1.0"
+    version="3.2.0"
 )
 
 # ===== إعداد CORS =====
@@ -74,6 +74,30 @@ class SystemRequest(BaseModel):
     eq1: str
     eq2: str
     eq3: Optional[str] = None
+
+# ===== دوال مساعدة للتنسيق =====
+# ============================================================================
+
+def format_number(num: float) -> str:
+    """
+    تنسيق الأعداد العشرية بشكل مفهوم
+    - الأعداد الصحيحة: 1.0 → 1
+    - الأعداد العشرية: 1.23456789 → 1.23 (تقريب منزلتين)
+    """
+    try:
+        if isinstance(num, float):
+            # إذا كان العدد صحيحاً (1.0)
+            if num.is_integer():
+                return str(int(num))
+            # تقريب إلى منزلتين عشريتين
+            rounded = round(num, 2)
+            # إذا أصبح صحيحاً بعد التقريب (1.00 → 1)
+            if rounded.is_integer():
+                return str(int(rounded))
+            return str(rounded)
+        return str(num)
+    except:
+        return str(num)
 
 # ===== دوال تحليل المعادلات =====
 # ============================================================================
@@ -252,9 +276,9 @@ def format_system_result(result: Any) -> str:
                     x = sol['x']
                     y = sol['y']
                     if x is not None and y is not None:
-                        # تنسيق الأعداد (إزالة .0 إذا كان عدداً صحيحاً)
-                        x_str = str(int(x)) if x.is_integer() else str(x)
-                        y_str = str(int(y)) if y.is_integer() else str(y)
+                        # تنسيق الأعداد باستخدام format_number
+                        x_str = format_number(x)
+                        y_str = format_number(y)
                         return f"x = {x_str}, y = {y_str}"
             
             # 2. تنسيق القالب 21 مع مفتاح sympy
@@ -264,8 +288,8 @@ def format_system_result(result: Any) -> str:
                     x = sympy_sol['x']
                     y = sympy_sol['y']
                     if x is not None and y is not None:
-                        x_str = str(int(x)) if isinstance(x, float) and x.is_integer() else str(x)
-                        y_str = str(int(y)) if isinstance(y, float) and y.is_integer() else str(y)
+                        x_str = format_number(x)
+                        y_str = format_number(y)
                         return f"x = {x_str}, y = {y_str}"
             
             # 3. تنسيق القالب 21 مع مفتاح cramer
@@ -275,8 +299,8 @@ def format_system_result(result: Any) -> str:
                     x = cramer_sol['x']
                     y = cramer_sol['y']
                     if x is not None and y is not None:
-                        x_str = str(int(x)) if isinstance(x, float) and x.is_integer() else str(x)
-                        y_str = str(int(y)) if isinstance(y, float) and y.is_integer() else str(y)
+                        x_str = format_number(x)
+                        y_str = format_number(y)
                         return f"x = {x_str}, y = {y_str}"
             
             # 4. تنسيق القالب 22 (عدد لا نهائي من الحلول)
@@ -296,15 +320,15 @@ def format_system_result(result: Any) -> str:
                         parts = []
                         if 'x' in sol and sol['x'] is not None:
                             x = sol['x']
-                            x_str = str(int(x)) if isinstance(x, float) and x.is_integer() else str(x)
+                            x_str = format_number(x)
                             parts.append(f"x = {x_str}")
                         if 'y' in sol and sol['y'] is not None:
                             y = sol['y']
-                            y_str = str(int(y)) if isinstance(y, float) and y.is_integer() else str(y)
+                            y_str = format_number(y)
                             parts.append(f"y = {y_str}")
                         if 'z' in sol and sol['z'] is not None:
                             z = sol['z']
-                            z_str = str(int(z)) if isinstance(z, float) and z.is_integer() else str(z)
+                            z_str = format_number(z)
                             parts.append(f"z = {z_str}")
                         if parts:
                             return ", ".join(parts)
@@ -315,32 +339,22 @@ def format_system_result(result: Any) -> str:
                 if isinstance(roots, dict) and 'values' in roots:
                     values = roots['values']
                     if 'real' in values and values['real']:
-                        real_roots = [str(int(r)) if isinstance(r, float) and r.is_integer() else str(r) for r in values['real']]
+                        real_roots = [format_number(r) for r in values['real']]
                         return f"x = {real_roots}"
                     elif 'decimal' in values:
-                        decimals = [str(int(d)) if isinstance(d, float) and d.is_integer() else str(d) for d in values['decimal']]
+                        decimals = [format_number(d) for d in values['decimal']]
                         return f"x = {decimals}"
             
             if 'solutions' in result and isinstance(result['solutions'], list):
-                solutions = [str(int(s)) if isinstance(s, float) and s.is_integer() else str(s) for s in result['solutions']]
+                solutions = [format_number(s) if isinstance(s, (int, float)) else str(s) for s in result['solutions']]
                 return f"x = {solutions}"
         
         # إذا كان النتيجة نصاً أو رقماً
         if isinstance(result, (int, float)):
-            if isinstance(result, float) and result.is_integer():
-                return str(int(result))
-            return str(result)
+            return format_number(result)
         
         if isinstance(result, list):
-            formatted = []
-            for item in result:
-                if isinstance(item, (int, float)):
-                    if isinstance(item, float) and item.is_integer():
-                        formatted.append(str(int(item)))
-                    else:
-                        formatted.append(str(item))
-                else:
-                    formatted.append(str(item))
+            formatted = [format_number(item) if isinstance(item, (int, float)) else str(item) for item in result]
             return f"x = {formatted}"
         
         # إذا لم نتمكن من التنسيق، نعيد النتيجة كسلسلة نصية بسيطة
@@ -419,17 +433,18 @@ def solve_system_3x3(eq1: str, eq2: str, eq3: str) -> Dict[str, Any]:
     حل نظام ثلاث معادلات 3×3
     """
     try:
-        # تحليل المعادلات (هذه نسخة مبسطة - تحتاج لتطوير)
-        # في الإصدار الحالي، نمرر المعادلات كما هي
+        logger.info(f"محاولة حل نظام 3×3: {eq1}, {eq2}, {eq3}")
         
+        # قائمة التوابع للمحاولة بالترتيب
         solvers = [
-            ("template_27_system_3x3_unique", solver1.template_27_system_3x3_unique),
+            ("template_27_system_3x3_unique", getattr(solver1, 'template_27_system_3x3_unique', None)),
             ("template_05_system_3x3", getattr(solver1, 'template_05_system_3x3', None)),
             ("template_28_system_3x3_gaussian", getattr(solver1, 'template_28_system_3x3_gaussian', None))
         ]
         
         for solver_name, solver_func in solvers:
             if solver_func is None:
+                logger.warning(f"{solver_name} غير موجودة")
                 continue
                 
             try:
@@ -438,18 +453,20 @@ def solve_system_3x3(eq1: str, eq2: str, eq3: str) -> Dict[str, Any]:
                 
                 if result:
                     formatted = format_system_result(result)
-                    return {
-                        "success": True,
-                        "result": formatted,
-                        "method": solver_name
-                    }
+                    if formatted and formatted != "لا يوجد حل":
+                        return {
+                            "success": True,
+                            "result": formatted,
+                            "method": solver_name
+                        }
             except Exception as e:
                 logger.warning(f"فشل {solver_name}: {e}")
                 continue
         
+        # إذا وصلنا إلى هنا، جميع المحاولات فشلت
         return {
             "success": False,
-            "error": "لم نتمكن من حل نظام 3×3 حالياً - قيد التطوير"
+            "error": "نظام المعادلات 3×3 قيد التطوير - سيتم إضافته قريباً"
         }
         
     except Exception as e:
@@ -903,9 +920,10 @@ async def health_check():
     """التحقق من صحة الخادم"""
     return {
         "status": "healthy",
-        "version": "3.1.0",
+        "version": "3.2.0",
         "templates": 152,
-        "parts": ["part1 (1-52)", "part2 (53-102)", "part3 (103-152)"]
+        "parts": ["part1 (1-52)", "part2 (53-102)", "part3 (103-152)"],
+        "features": ["القيمة المطلقة", "نظام 2×2", "نظام 3×3 (قيد التطوير)", "تقريب الأعداد"]
     }
 
 # ===== تشغيل الخادم =====
@@ -913,7 +931,7 @@ if __name__ == "__main__":
     print("=" * 70)
     print("🚀 بسم الله الرحمن الرحيم")
     print("=" * 70)
-    print("🧮 تشغيل خادم الويب المتكامل - النسخة النهائية v3.1.0")
+    print("🧮 تشغيل خادم الويب المتكامل - النسخة النهائية v3.2.0")
     print("=" * 70)
     print(f"📍 العنوان المحلي: http://127.0.0.1:8000")
     print(f"🌐 العنوان الشبكي: http://localhost:8000")
@@ -922,6 +940,12 @@ if __name__ == "__main__":
     print(f"   📁 الجزء الأول: القوالب 1-52 (الجبر الأساسي)")
     print(f"   📁 الجزء الثاني: القوالب 53-102 (الجبر المتوسط)")
     print(f"   📁 الجزء الثالث: القوالب 103-152 (الجبر المتقدم)")
+    print("=" * 70)
+    print("🔍 الميزات الجديدة:")
+    print("   ✅ دعم القيمة المطلقة |x| في المعادلات")
+    print("   ✅ تقريب الأعداد العشرية (1.234 → 1.23)")
+    print("   ✅ نظام 2×2 يعمل بكفاءة")
+    print("   ⚠️ نظام 3×3 قيد التطوير")
     print("=" * 70)
     print("🔍 نقاط النهاية المتاحة:")
     print("   ✅ POST /calculate - الحسابات العامة")
@@ -934,6 +958,7 @@ if __name__ == "__main__":
     print("=" * 70)
     print("📝 أمثلة للاستخدام:")
     print("   • [2*x + 3*y = 8, 3*x - y = 1]  → x = 1, y = 2")
+    print("   • |2*x - 5| = 7                  → x = -1, x = 6")
     print("   • x^2 - 5*x + 6 = 0             → x = [2, 3]")
     print("   • sin(30)                        → 0.5")
     print("   • log(x, 2) + log(x-2, 2) = 3    → x = 4")
