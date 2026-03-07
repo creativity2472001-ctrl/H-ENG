@@ -1847,7 +1847,7 @@ class IntermediateAlgebraSolver:
                 # |expr| = 0 → expr = 0
                 eq = sp.Eq(expr, 0)
                 solutions = sp.solve(eq, x_var)
-                cases = [{'case': f"{expression} = 0", 'solutions': [float(sp.N(s)) for s in solutions]}]
+                cases = [{'case': f"{expression} = 0", 'solutions': [float(s) for s in solutions if s.is_real]}]
                 solution_type = 'single' if len(solutions) == 1 else 'multiple'
             else:
                 # |expr| = c → expr = c أو expr = -c
@@ -1859,8 +1859,8 @@ class IntermediateAlgebraSolver:
                 
                 solutions = sol1 + sol2
                 cases = [
-                    {'case': f"{expression} = {value}", 'solutions': [float(sp.N(s)) for s in sol1]},
-                    {'case': f"{expression} = {-value}", 'solutions': [float(sp.N(s)) for s in sol2]}
+                    {'case': f"{expression} = {value}", 'solutions': [float(s) for s in sol1 if s.is_real]},
+                    {'case': f"{expression} = {-value}", 'solutions': [float(s) for s in sol2 if s.is_real]}
                 ]
                 solution_type = 'two_solutions' if len(solutions) == 2 else 'multiple'
             
@@ -1872,7 +1872,7 @@ class IntermediateAlgebraSolver:
                 'equation': f"|{expression}| = {value}",
                 'solution_type': solution_type,
                 'cases': cases,
-                'solutions': [float(sp.N(s)) for s in solutions] if solutions else [],
+                'solutions': [float(s) for s in solutions if s.is_real] if solutions else [],
                 'verification': self._verify_absolute_solutions(expr, value, solutions)
             }
             
