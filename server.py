@@ -1003,9 +1003,6 @@ if __name__ == "__main__":
     print("   ✅ نقطة /calculate الأصلية تعمل")  
     print("   ✅ نقطة /solve الجديدة مع الخطوات")  
     print("=" * 70)  
-    print("📝 أمثلة للاستخدام:")  
-    print("   POST /calculate  - {\\"expression\\": \\"|2*x - 5| = 7\\"}")  
-    print("   POST /solve      - {\\"expression\\": \\"log(x,4) = log(16,x)\\"}")  
-    print("=" * 70)  
-      
-    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
+print("📝 أمثلة للاستخدام:")  
+print('   POST /calculate  - {"expression": "|2*x - 5| = 7"}')  
+print('   POST /solve      - {"expression": "log(x,4) = log(16,x)"}')
