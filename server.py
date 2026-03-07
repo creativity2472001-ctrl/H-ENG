@@ -118,7 +118,7 @@ class SolutionFormatter:
             if 'x' in expression:
                 self.add_step(f"   ننقل الحدود الثابتة للطرف الآخر")
                 self.add_step(f"   نجمع الحدود")
-                self.add_step(f   "   نوجد قيمة x")
+                self.add_step("   نوجد قيمة x")  # ✅ هذا هو الصحيح
         
         self.add_space()
         
