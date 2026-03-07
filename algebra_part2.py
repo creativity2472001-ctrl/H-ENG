@@ -1834,8 +1834,10 @@ class IntermediateAlgebraSolver:
         self.stats['total_calls'] += 1
         
         try:
+            # تحويل التعبير إلى SymPy
             expr = sp.sympify(expression)
             
+            # معالجة الحالات المختلفة
             if value < 0:
                 # |expr| = قيمة سالبة → لا يوجد حل
                 solutions = []
@@ -1862,6 +1864,31 @@ class IntermediateAlgebraSolver:
                 ]
                 solution_type = 'two_solutions' if len(solutions) == 2 else 'multiple'
             
+            # تحويل الحلول إلى أرقام مع التحقق
+            solutions_float = []
+            for sol in solutions:
+                try:
+                    solutions_float.append(float(sp.N(sol)))
+                except:
+                    solutions_float.append(str(sol))
+            
+            # التحقق من الحلول
+            verification = []
+            for sol in solutions:
+                try:
+                    expr_val = float(sp.N(expr.subs(self.x, sol)))
+                    abs_val = abs(expr_val)
+                    verification.append({
+                        'solution': float(sp.N(sol)),
+                        'expression_value': expr_val,
+                        'absolute_value': abs_val,
+                        'expected': value,
+                        'error': abs(abs_val - value),
+                        'is_valid': abs(abs_val - value) < self.precision
+                    })
+                except:
+                    pass
+            
             result = {
                 'template_id': template_id,
                 'template_name': 'absolute_simple',
@@ -1870,8 +1897,8 @@ class IntermediateAlgebraSolver:
                 'equation': f"|{expression}| = {value}",
                 'solution_type': solution_type,
                 'cases': cases,
-                'solutions': [float(sp.N(s)) for s in solutions] if solutions else [],
-                'verification': self._verify_absolute_solutions(expr, value, solutions)
+                'solutions': solutions_float,
+                'verification': verification
             }
             
             self.stats['successful'] += 1
