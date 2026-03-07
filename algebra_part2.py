@@ -1835,6 +1835,8 @@ class IntermediateAlgebraSolver:
         
         try:
             expr = sp.sympify(expression)
+            # استخدام متغير محلي للحل بدلاً من self.x
+            x_var = sp.Symbol('x')
             
             if value < 0:
                 # |expr| = قيمة سالبة → لا يوجد حل
@@ -1844,7 +1846,7 @@ class IntermediateAlgebraSolver:
             elif abs(value) < self.precision:
                 # |expr| = 0 → expr = 0
                 eq = sp.Eq(expr, 0)
-                solutions = sp.solve(eq, self.x)
+                solutions = sp.solve(eq, x_var)
                 cases = [{'case': f"{expression} = 0", 'solutions': [float(sp.N(s)) for s in solutions]}]
                 solution_type = 'single' if len(solutions) == 1 else 'multiple'
             else:
@@ -1852,8 +1854,8 @@ class IntermediateAlgebraSolver:
                 eq1 = sp.Eq(expr, value)
                 eq2 = sp.Eq(expr, -value)
                 
-                sol1 = sp.solve(eq1, self.x)
-                sol2 = sp.solve(eq2, self.x)
+                sol1 = sp.solve(eq1, x_var)
+                sol2 = sp.solve(eq2, x_var)
                 
                 solutions = sol1 + sol2
                 cases = [
