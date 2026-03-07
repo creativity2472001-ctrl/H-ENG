@@ -3634,4 +3634,4 @@ class IntermediateAlgebraSolver:
                 solution_type = 'two_solutions' if len(solutions) == 2 else 'multiple'
                 solution_message = f"x = {', '.join([str(self._safe_float_conversion(s)) for s in solutions])}" if solutions else "لا يوجد حل"
             
-            # تحويل الحلول
+
