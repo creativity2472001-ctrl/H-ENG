@@ -1,4 +1,4 @@
-# calculator.py - محرك الحسابات الأساسي
+# calculator.py - محرك الحسابات الأساسي (نسخة مصححة)
 import math
 import re
 
@@ -18,6 +18,7 @@ class Calculator:
             expr = expression.replace('×', '*').replace('÷', '/')
             expr = expr.replace('^', '**')
             expr = expr.replace('√', 'sqrt')
+            expr = expr.replace('²', '**2').replace('³', '**3')
             
             # تقييم آمن
             result = eval(expr, {"__builtins__": {}}, math.__dict__)
@@ -26,51 +27,129 @@ class Calculator:
         except Exception as e:
             return f"خطأ: {e}"
     
-    # ========== حل المعادلات (إضافة جديدة) ==========
+    # ========== حل المعادلات (نسخة محسنة) ==========
     
     def solve_equation(self, equation: str):
-        """حل معادلة بسيطة مثل x+5=10 أو 2x+3=7"""
+        """حل جميع أنواع المعادلات - نسخة محسنة"""
         try:
             if '=' not in equation:
                 return "المعادلة يجب أن تحتوي على علامة ="
             
-            # ===== إضافة دعم صيغة القيمة المطلقة |x| بطريقة آمنة =====
-            modified_equation = equation
-            if '|' in modified_equation:
-                # استخدام regex للتعامل مع كل |تعبير| بشكل منفصل
-                pattern = r'\|([^|]+)\|'
-                modified_equation = re.sub(pattern, r'Abs(\1)', modified_equation)
+            # تنظيف المعادلة
+            equation = equation.strip()
             
-            # استيراد sympy هنا لتجنب الاعتماد عليه إذا لم يكن مثبتاً
-            from sympy import symbols, Eq, solve, sympify
+            # ===== تحويل الرموز الخاصة =====
+            modified = equation
+            modified = modified.replace('²', '**2').replace('³', '**3')
+            modified = modified.replace('^', '**')
+            modified = modified.replace(' ', '')
             
-            # 👈 الرجوع إلى الوضع الطبيعي (بدون real=True)
+            # ===== معالجة القيمة المطلقة =====
+            if '|' in modified:
+                modified = re.sub(r'\|([^|]+)\|', r'Abs(\1)', modified)
+            
+            # ===== استيراد sympy =====
+            try:
+                from sympy import symbols, Eq, solve, sympify, N
+                from sympy import Abs
+            except ImportError:
+                return "خطأ: مكتبة sympy غير مثبتة. قم بتشغيل: pip install sympy"
+            
             x = symbols('x')
-            left, right = modified_equation.split('=')
             
+            # ===== فصل طرفي المعادلة =====
+            # معالجة الحالة التي يكون فيها الطرف الأيمن مجرد رقم
+            if '=' in modified:
+                left, right = modified.split('=', 1)
+            else:
+                return "صيغة المعادلة غير صحيحة"
+            
+            # ===== تحويل الصيغ =====
             # تحويل 2x إلى 2*x
-            left = left.strip()
-            left = re.sub(r'(\d+)([a-zA-Z])', r'\1*\2', left)
+            left = re.sub(r'(\d+)([a-zA-Z\(])', r'\1*\2', left)
+            right = re.sub(r'(\d+)([a-zA-Z\(])', r'\1*\2', right)
+            
+            # تحويل x2 إلى x*2
             left = re.sub(r'([a-zA-Z])(\d+)', r'\1*\2', left)
+            right = re.sub(r'([a-zA-Z])(\d+)', r'\1*\2', right)
             
-            # تحويل الطرفين إلى تعابير sympy
-            left_expr = sympify(left)
-            right_expr = sympify(right.strip())
+            # معالجة خاصة للمعادلات التي فيها x في الطرفين
+            # مثل: 5x + 3 = 2x + 9
+            left = left.replace('+', ' +').replace('-', ' -')
+            right = right.replace('+', ' +').replace('-', ' -')
             
+            # ===== تحويل النصوص إلى تعابير رياضية =====
+            try:
+                left_expr = sympify(left)
+                right_expr = sympify(right)
+            except Exception as e:
+                # محاولة ثانية بمعالجة مختلفة
+                left = left.replace('**', '^').replace('^', '**')
+                right = right.replace('**', '^').replace('^', '**')
+                left_expr = sympify(left)
+                right_expr = sympify(right)
+            
+            # ===== بناء المعادلة وحلها =====
             eq = Eq(left_expr, right_expr)
             solutions = solve(eq, x)
             
             if not solutions:
                 return "لا يوجد حل"
             
-            if len(solutions) == 1:
-                return f"x = {solutions[0]}"
+            # ===== تنسيق النتائج بشكل جميل =====
+            formatted_solutions = []
+            for sol in solutions:
+                # تحويل الحلول إلى أعداد عشرية
+                if sol.is_real:
+                    try:
+                        val = float(N(sol))
+                        # إذا كان الحل صحيحاً (1.0 → 1)
+                        if abs(val - round(val)) < 1e-10:
+                            formatted_solutions.append(str(int(round(val))))
+                        else:
+                            # تقريب إلى 3 منازل عشرية
+                            rounded = round(val, 3)
+                            if abs(rounded - round(rounded)) < 1e-10:
+                                formatted_solutions.append(str(int(round(rounded))))
+                            else:
+                                formatted_solutions.append(str(rounded).rstrip('0').rstrip('.'))
+                    except:
+                        formatted_solutions.append(str(sol))
+                else:
+                    # حلول مركبة
+                    formatted_solutions.append(str(sol).replace('I', 'i'))
+            
+            # ===== إرجاع النتيجة =====
+            if len(formatted_solutions) == 1:
+                return f"x = {formatted_solutions[0]}"
+            elif len(formatted_solutions) == 2:
+                return f"x = {formatted_solutions[0]} أو x = {formatted_solutions[1]}"
             else:
-                return f"x = {solutions}"
-        except ImportError:
-            return "خطأ: مكتبة sympy غير مثبتة. قم بتشغيل: pip install sympy"
+                return f"x = {', '.join(formatted_solutions)}"
+            
         except Exception as e:
-            return f"خطأ في حل المعادلة: {e}"
+            return f"خطأ في حل المعادلة: {str(e)}"
+    
+    # ========== دوال مساعدة للمعادلات الخاصة ==========
+    
+    def solve_quadratic(self, a, b, c):
+        """حل معادلة تربيعية: ax² + bx + c = 0"""
+        try:
+            discriminant = b**2 - 4*a*c
+            
+            if discriminant > 0:
+                x1 = (-b + math.sqrt(discriminant)) / (2*a)
+                x2 = (-b - math.sqrt(discriminant)) / (2*a)
+                return [x1, x2]
+            elif discriminant == 0:
+                x = -b / (2*a)
+                return [x]
+            else:
+                real = -b / (2*a)
+                imag = math.sqrt(-discriminant) / (2*a)
+                return [complex(real, imag), complex(real, -imag)]
+        except:
+            return None
     
     # ========== عمليات منفصلة (للويب) ==========
     
@@ -97,7 +176,10 @@ class Calculator:
         return a ** 0.5
     
     def cbrt(self, a):
-        return a ** (1/3)
+        if a >= 0:
+            return a ** (1/3)
+        else:
+            return -((-a) ** (1/3))
     
     def sin(self, angle):
         return math.sin(math.radians(angle))
@@ -112,9 +194,13 @@ class Calculator:
         return math.factorial(int(n))
     
     def log10(self, a):
+        if a <= 0:
+            return "خطأ: اللوغاريتم غير معرف للأعداد السالبة أو الصفر"
         return math.log10(a)
     
     def ln(self, a):
+        if a <= 0:
+            return "خطأ: اللوغاريتم الطبيعي غير معرف للأعداد السالبة أو الصفر"
         return math.log(a)
     
     # ========== الذاكرة ==========
