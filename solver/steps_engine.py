@@ -1,19 +1,16 @@
-# steps_engine.py - محرك خطوات الحل الكامل
+# steps_engine.py - محرك خطوات الحل الكامل (نسخة مصححة)
 import logging
 import re
 import math
-from math_engine.algebra.algebra_part1 import CompleteAlgebraSolver
-from math_engine.algebra.algebra_part2 import IntermediateAlgebraSolver
+from sympy import symbols, Eq, solve, sympify, N
 from calculator import Calculator
 
 logger = logging.getLogger(__name__)
 
 # تهيئة الكائنات
-solver1 = CompleteAlgebraSolver()
-solver2 = IntermediateAlgebraSolver()
 calc = Calculator()
 
-def format_number(num: float) -> str:
+def format_number(num) -> str:
     """تنسيق الأعداد للعرض"""
     try:
         if isinstance(num, float):
@@ -27,6 +24,36 @@ def format_number(num: float) -> str:
     except:
         return str(num)
 
+def extract_coefficients_from_quadratic(equation: str):
+    """استخراج معاملات المعادلة التربيعية باستخدام sympy"""
+    x = symbols('x')
+    
+    # تنظيف المعادلة
+    clean_eq = equation.replace('²', '**2').replace('^', '**').replace(' ', '')
+    
+    if '=' in clean_eq:
+        left, right = clean_eq.split('=')
+        try:
+            right_val = float(right)
+        except:
+            right_val = 0
+        
+        # تحويل 2x إلى 2*x
+        left = re.sub(r'(\d+)([a-zA-Z])', r'\1*\2', left)
+        
+        # إنشاء التعبير
+        expr = sympify(f"({left}) - ({right_val})")
+        expanded = expr.expand()
+        
+        # استخراج المعاملات
+        coeff_dict = expanded.as_coefficients_dict()
+        a = float(coeff_dict.get(x**2, 0))
+        b = float(coeff_dict.get(x, 0))
+        c = float(coeff_dict.get(1, 0))
+        
+        return a, b, c
+    return 0, 0, 0
+
 def solve_quadratic_with_steps(equation: str) -> dict:
     """حل معادلة تربيعية مع خطوات"""
     steps = []
@@ -34,38 +61,16 @@ def solve_quadratic_with_steps(equation: str) -> dict:
     steps.append("")
     
     try:
-        # تنظيف المعادلة
-        clean_eq = equation.replace(' ', '').replace('²', '^2').replace('=', '=')
+        # استخراج المعاملات باستخدام sympy
+        a, b, c = extract_coefficients_from_quadratic(equation)
         
-        # استخراج المعاملات
-        left, right = clean_eq.split('=')
-        right_val = float(right) if right else 0
-        
-        # تحويل الطرف الأيسر
-        left = left.replace('^2', '**2')
-        
-        # استخراج a, b, c
-        a = b = c = 0
-        
-        # استخراج a (معامل x²)
-        a_match = re.search(r'([+-]?\d*\.?\d*)\*?x\*\*2', left)
-        if a_match:
-            a_str = a_match.group(1)
-            a = 1.0 if a_str in ['', '+'] else -1.0 if a_str == '-' else float(a_str)
-        
-        # استخراج b (معامل x)
-        b_match = re.search(r'([+-]?\d*\.?\d*)\*?x(?!\*\*)', left)
-        if b_match:
-            b_str = b_match.group(1)
-            b = 1.0 if b_str in ['', '+'] else -1.0 if b_str == '-' else float(b_str)
-        
-        # استخراج c (ثابت)
-        const_match = re.search(r'([+-]?\d+\.?\d*)(?![\dx\*\*])', left)
-        if const_match:
-            c = float(const_match.group(1))
-        
-        # تعديل حسب الطرف الأيمن
-        c = c - right_val
+        if a == 0:
+            return {
+                "success": False,
+                "error": "هذه ليست معادلة تربيعية (a = 0)",
+                "steps": steps,
+                "result": None
+            }
         
         steps.append("📐 **الخطوة 1: كتابة المعادلة على الصورة القياسية**")
         steps.append(f"   {format_number(a)}x² + {format_number(b)}x + {format_number(c)} = 0")
@@ -141,20 +146,25 @@ def solve_linear_with_steps(equation: str) -> dict:
     steps.append("")
     
     try:
+        from sympy import symbols, Eq, solve, sympify
+        x = symbols('x')
+        
         # تنظيف المعادلة
         clean_eq = equation.replace(' ', '')
         left, right = clean_eq.split('=')
         
         # تحويل 2x إلى 2*x
         left = re.sub(r'(\d+)([a-zA-Z])', r'\1*\2', left)
-        
-        # استخراج المعاملات
-        from sympy import symbols, Eq, solve, sympify
-        x = symbols('x')
+        right = re.sub(r'(\d+)([a-zA-Z])', r'\1*\2', right)
         
         left_expr = sympify(left)
         right_expr = sympify(right)
         
+        steps.append("📐 **الخطوة 1: نقل الحدود**")
+        steps.append(f"   {left} = {right}")
+        steps.append("")
+        
+        # حل المعادلة
         eq = Eq(left_expr, right_expr)
         solutions = solve(eq, x)
         
@@ -162,9 +172,6 @@ def solve_linear_with_steps(equation: str) -> dict:
             x_val = float(solutions[0])
             result = f"x = {format_number(x_val)}"
             
-            steps.append("📐 **الخطوة 1: نقل الحدود**")
-            steps.append(f"   {left} = {right}")
-            steps.append("")
             steps.append("📐 **الخطوة 2: حل المعادلة**")
             steps.append(f"   x = {format_number(x_val)}")
             steps.append("")
@@ -188,6 +195,56 @@ def solve_linear_with_steps(equation: str) -> dict:
             "result": None
         }
 
+def solve_absolute_manual(expression: str, value: float) -> list:
+    """حل معادلة القيمة المطلقة يدوياً"""
+    solutions = []
+    
+    # استخراج معامل x والثابت
+    clean_expr = expression.replace(' ', '')
+    
+    # التعامل مع الصيغ المختلفة
+    if '+' in clean_expr:
+        parts = clean_expr.split('+')
+        x_part = parts[0]
+        const_part = parts[1] if len(parts) > 1 else '0'
+    elif '-' in clean_expr and clean_expr.index('-') > 0:
+        parts = clean_expr.split('-')
+        x_part = parts[0]
+        const_part = '-' + parts[1] if len(parts) > 1 else '0'
+    else:
+        x_part = clean_expr
+        const_part = '0'
+    
+    # استخراج معامل x
+    if 'x' in x_part:
+        coeff_str = x_part.replace('x', '').replace('*', '')
+        if coeff_str == '' or coeff_str == '+':
+            coeff = 1.0
+        elif coeff_str == '-':
+            coeff = -1.0
+        else:
+            try:
+                coeff = float(coeff_str)
+            except:
+                coeff = 1.0
+    else:
+        coeff = 0.0
+    
+    # استخراج الثابت
+    try:
+        constant = float(const_part)
+    except:
+        constant = 0.0
+    
+    # الحل: |ax + b| = c
+    # ax + b = c  أو  ax + b = -c
+    if coeff != 0:
+        sol1 = (value - constant) / coeff
+        sol2 = (-value - constant) / coeff
+        solutions = [sol1, sol2]
+    
+    return solutions
+
 def solve_absolute_with_steps(equation: str) -> dict:
     """حل معادلة قيمة مطلقة مع خطوات"""
     steps = []
@@ -202,65 +259,40 @@ def solve_absolute_with_steps(equation: str) -> dict:
         
         expr_inside = match.group(1).strip()
         value_str = match.group(2).strip()
-        value = float(value_str)
+        
+        try:
+            value = float(value_str)
+        except:
+            value = float(eval(value_str, {"__builtins__": {}}, math.__dict__))
         
         steps.append("📏 **قاعدة:** |تعبير| = قيمة ⇒ تعبير = قيمة أو تعبير = -قيمة")
         steps.append("")
         
-        # استخراج معامل x والثابت
-        clean_expr = expr_inside.replace(' ', '')
-        x_coeff = 1.0
-        constant = 0.0
+        # حل المعادلة يدوياً
+        solutions = solve_absolute_manual(expr_inside, value)
         
-        x_match = re.search(r'([+-]?\d*\.?\d*)\*?x', clean_expr)
-        if x_match:
-            coeff = x_match.group(1)
-            x_coeff = 1.0 if coeff in ['', '+'] else -1.0 if coeff == '-' else float(coeff)
-        
-        const_match = re.search(r'([+-]?\d+\.?\d*)$', clean_expr.replace('x', ''))
-        if const_match:
-            constant = float(const_match.group(1))
+        if not solutions:
+            steps.append("❌ لا يوجد حل")
+            return {
+                "success": True,
+                "steps": steps,
+                "result": "لا يوجد حل"
+            }
         
         steps.append("📐 **الخطوة 1: كتابة الحالتين**")
         steps.append(f"   **الحالة الأولى:** {expr_inside} = {format_number(value)}")
         steps.append(f"   **الحالة الثانية:** {expr_inside} = -{format_number(value)}")
         steps.append("")
         
-        # الحالة الأولى
         steps.append("📐 **الخطوة 2: حل الحالة الأولى**")
-        steps.append(f"   {x_coeff}x + {constant} = {format_number(value)}")
-        
-        if constant >= 0:
-            steps.append(f"   {x_coeff}x = {format_number(value)} - {format_number(constant)}")
-        else:
-            steps.append(f"   {x_coeff}x = {format_number(value)} + {format_number(-constant)}")
-        
-        right1 = value - constant
-        steps.append(f"   {x_coeff}x = {format_number(right1)}")
-        
-        x1 = right1 / x_coeff
-        steps.append(f"   x = {format_number(right1)} / {format_number(x_coeff)}")
-        steps.append(f"   x₁ = {format_number(x1)}")
+        steps.append(f"   x = {format_number(solutions[0])}")
         steps.append("")
         
-        # الحالة الثانية
         steps.append("📐 **الخطوة 3: حل الحالة الثانية**")
-        steps.append(f"   {x_coeff}x + {constant} = -{format_number(value)}")
-        
-        if constant >= 0:
-            steps.append(f"   {x_coeff}x = -{format_number(value)} - {format_number(constant)}")
-        else:
-            steps.append(f"   {x_coeff}x = -{format_number(value)} + {format_number(-constant)}")
-        
-        right2 = -value - constant
-        steps.append(f"   {x_coeff}x = {format_number(right2)}")
-        
-        x2 = right2 / x_coeff
-        steps.append(f"   x = {format_number(right2)} / {format_number(x_coeff)}")
-        steps.append(f"   x₂ = {format_number(x2)}")
+        steps.append(f"   x = {format_number(solutions[1])}")
         steps.append("")
         
-        result = f"x = {format_number(x1)} أو x = {format_number(x2)}"
+        result = f"x = {format_number(solutions[0])} أو x = {format_number(solutions[1])}"
         steps.append(f"✅ **الإجابة النهائية:** {result}")
         
         return {
@@ -287,18 +319,21 @@ def solve_system_2x2_with_steps(eq1: str, eq2: str) -> dict:
     steps.append("")
     
     try:
-        from sympy import symbols, Eq, solve
+        from sympy import symbols, Eq, solve, sympify
         x, y = symbols('x y')
         
-        # تحليل المعادلات
+        # تنظيف المعادلات
         left1, right1 = eq1.split('=')
         left2, right2 = eq2.split('=')
         
-        from sympy import sympify
+        # تحويل 2x إلى 2*x
+        left1 = re.sub(r'(\d+)([a-zA-Z])', r'\1*\2', left1)
+        left2 = re.sub(r'(\d+)([a-zA-Z])', r'\1*\2', left2)
+        
         eq1_sym = Eq(sympify(left1), sympify(right1))
         eq2_sym = Eq(sympify(left2), sympify(right2))
         
-        steps.append("📐 **الخطوة 1: نكتب النظام بالصورة القياسية**")
+        steps.append("📐 **الخطوة 1: كتابة النظام بالصورة القياسية**")
         steps.append("")
         
         # حل النظام
@@ -308,10 +343,9 @@ def solve_system_2x2_with_steps(eq1: str, eq2: str) -> dict:
             x_val = float(solution[x])
             y_val = float(solution[y])
             
-            steps.append("📐 **الخطوة 2: نحل النظام باستخدام طريقة الحذف**")
-            steps.append("")
-            steps.append("📐 **الخطوة 3: نوجد قيمة x**")
-            steps.append("📐 **الخطوة 4: نعوض لإيجاد قيمة y**")
+            steps.append("📐 **الخطوة 2: حل النظام**")
+            steps.append(f"   x = {format_number(x_val)}")
+            steps.append(f"   y = {format_number(y_val)}")
             steps.append("")
             
             result = f"x = {format_number(x_val)}, y = {format_number(y_val)}"
@@ -344,7 +378,6 @@ def solve_with_steps(expression: str) -> dict:
     
     # 2. نظم المعادلات
     if expression.startswith('[') and expression.endswith(']') and ',' in expression:
-        # استخراج المعادلتين
         inner = expression[1:-1].strip()
         if ',' in inner:
             eqs = [e.strip() for e in inner.split(',')]
