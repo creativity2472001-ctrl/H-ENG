@@ -1,4 +1,4 @@
-# solver/solver_controller.py - يحتوي على كل منطق التحكم
+# solver/solver_controller.py - يحتوي على كل منطق التحكم (نسخة مصححة)
 import re
 import math
 import logging
@@ -7,6 +7,9 @@ from calculator import Calculator
 from math_engine.algebra.algebra_part1 import CompleteAlgebraSolver
 from math_engine.algebra.algebra_part2 import IntermediateAlgebraSolver
 from math_engine.algebra.algebra_part3 import AdvancedAlgebraSolver
+
+# استيراد محرك الخطوات (مهم جداً)
+from .steps_engine import solve_with_steps
 
 logger = logging.getLogger(__name__)
 
@@ -250,15 +253,77 @@ def solve_system_3x3(eq1: str, eq2: str, eq3: str) -> Dict:
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+# ===== حل القيمة المطلقة يدوياً (بديل للقالب 86) =====
+def solve_absolute_manual(expression: str, value: float) -> list:
+    """حل معادلة القيمة المطلقة يدوياً"""
+    solutions = []
+    try:
+        # استخراج معامل x والثابت
+        clean_expr = expression.replace(' ', '')
+        
+        if '+' in clean_expr:
+            parts = clean_expr.split('+')
+            x_part = parts[0]
+            const_part = parts[1] if len(parts) > 1 else '0'
+        elif '-' in clean_expr and clean_expr.index('-') > 0:
+            parts = clean_expr.split('-')
+            x_part = parts[0]
+            const_part = '-' + parts[1] if len(parts) > 1 else '0'
+        else:
+            x_part = clean_expr
+            const_part = '0'
+        
+        # استخراج معامل x
+        if 'x' in x_part:
+            coeff_str = x_part.replace('x', '').replace('*', '')
+            if coeff_str == '' or coeff_str == '+':
+                coeff = 1.0
+            elif coeff_str == '-':
+                coeff = -1.0
+            else:
+                try:
+                    coeff = float(coeff_str)
+                except:
+                    coeff = 1.0
+        else:
+            coeff = 1.0
+        
+        # استخراج الثابت
+        try:
+            constant = float(const_part)
+        except:
+            constant = 0.0
+        
+        # الحل: |ax + b| = c
+        if value >= 0:
+            sol1 = (value - constant) / coeff
+            sol2 = (-value - constant) / coeff
+            solutions = [sol1, sol2]
+        
+        return solutions
+    except:
+        return []
+
 # ===== الدوال الرئيسية =====
 def solve_calculate(expression: str) -> Dict:
-    """معالجة طلب /calculate من الملف الأصلي"""
+    """معالجة طلب /calculate"""
     try:
         expr = expression.strip()
         logger.info(f"معالجة: {expr}")
         
-        # 1. القيمة المطلقة
-        if '|' in expr and '=' in expr and not (expr.startswith('[') and expr.endswith(']')):
+        # 1. نستخدم steps_engine للحصول على النتيجة مع الخطوات
+        steps_result = solve_with_steps(expr)
+        
+        if steps_result.get("success", False):
+            # نرجع النتيجة فقط (بدون خطوات) لأن هذا /calculate
+            return {
+                "success": True,
+                "result": steps_result.get("result", "")
+            }
+        
+        # 2. إذا فشل steps_engine، نستخدم الطرق القديمة
+        # القيمة المطلقة (يدوياً)
+        if '|' in expr and '=' in expr:
             match = re.search(r'\|(.*?)\|\s*=\s*(.+)', expr)
             if match:
                 expr_inside = match.group(1).strip()
@@ -268,21 +333,12 @@ def solve_calculate(expression: str) -> Dict:
                 except:
                     value = float(eval(value_str, {"__builtins__": {}}, math.__dict__))
                 
-                result = solver2.template_86_absolute_simple(expr_inside, value)
-                if result:
-                    solutions = []
-                    if 'solutions' in result:
-                        solutions = result['solutions']
-                    elif 'cases' in result:
-                        for case in result['cases']:
-                            if 'solutions' in case:
-                                solutions.extend(case['solutions'])
-                    
-                    if solutions:
-                        formatted = [format_number(s) for s in solutions]
-                        return {"success": True, "result": f"x = {formatted}"}
+                solutions = solve_absolute_manual(expr_inside, value)
+                if solutions:
+                    formatted = [format_number(s) for s in solutions]
+                    return {"success": True, "result": f"x = {formatted}"}
         
-        # 2. نظم المعادلات
+        # نظم المعادلات
         if expr.startswith('[') and expr.endswith(']') and ',' in expr:
             system = parse_system_equations(expr)
             if system:
@@ -291,7 +347,7 @@ def solve_calculate(expression: str) -> Dict:
                 elif system["type"] == "system_3x3":
                     return solve_system_3x3(system["eq1"], system["eq2"], system["eq3"])
         
-        # 3. الدوال المثلثية
+        # الدوال المثلثية
         sin_match = re.search(r'sin\((\d+)\)', expr)
         if sin_match:
             angle = float(sin_match.group(1))
@@ -316,14 +372,14 @@ def solve_calculate(expression: str) -> Dict:
             result = calc.ln(num)
             return {"success": True, "result": str(int(result)) if result.is_integer() else str(result)}
         
-        # 4. المعادلات
+        # المعادلات
         if '=' in expr:
             result = calc.solve_equation(expr)
             if isinstance(result, str) and result.startswith('خطأ'):
                 return {"success": False, "error": result}
             return {"success": True, "result": str(result)}
         
-        # 5. عمليات حسابية
+        # عمليات حسابية
         result = calc.calculate(expr)
         if isinstance(result, float) and result.is_integer():
             result = int(result)
@@ -356,9 +412,13 @@ def solve_template(template_id: int, params: dict) -> Dict:
             if template_id == 59:
                 result = solver2.template_59_square_root_simplify(params.get('number'))
             elif template_id == 86:
-                result = solver2.template_86_absolute_simple(
-                    params.get('expression'), params.get('value')
-                )
+                # استخدام الحل اليدوي كبديل
+                expr = params.get('expression')
+                value = params.get('value')
+                if expr and value:
+                    solutions = solve_absolute_manual(expr, value)
+                    if solutions:
+                        return {"success": True, "result": f"x = {solutions}"}
         
         elif 103 <= template_id <= 152:
             if template_id == 103:
@@ -395,6 +455,8 @@ def search_templates(keyword: str) -> Dict:
         ])
     if keyword in ['جذر', 'root']:
         results.append({'template_id': 59, 'name': 'تبسيط جذر تربيعي'})
+    if keyword in ['قيمة مطلقة', 'absolute']:
+        results.append({'template_id': 86, 'name': 'معادلة القيمة المطلقة'})
     
     return {"success": True, "results": results}
 
