@@ -1,4 +1,4 @@
-# calculator.py - محرك الحسابات الأساسي (نسخة مصححة)
+# calculator.py - محرك الحسابات الأساسي (نسخة مصححة نهائياً)
 import math
 import re
 
@@ -9,28 +9,64 @@ class Calculator:
         self.last_result = None
         self.memory = 0
     
-    # ========== العمليات الأساسية ==========
+    # ========== العمليات الأساسية (محسنة) ==========
     
     def calculate(self, expression: str):
-        """حساب تعبير رياضي كامل"""
+        """حساب تعبير رياضي كامل - مع دعم جميع الرموز"""
         try:
-            # استبدال الرموز
+            # استبدال الرموز الأساسية
             expr = expression.replace('×', '*').replace('÷', '/')
-            expr = expr.replace('^', '**')
             expr = expr.replace('√', 'sqrt')
-            expr = expr.replace('²', '**2').replace('³', '**3')
+            expr = expr.replace('²', '**2').replace('³', '**3').replace('⁴', '**4')
+            
+            # معالجة الدوال المثلثية (تحويل الدرجات إلى راديان)
+            def replace_trig(match):
+                func = match.group(1)  # sin, cos, tan
+                angle = float(match.group(2))
+                rad = math.radians(angle)
+                if func == 'sin':
+                    return str(math.sin(rad))
+                elif func == 'cos':
+                    return str(math.cos(rad))
+                elif func == 'tan':
+                    return str(math.tan(rad))
+                return match.group(0)
+            
+            # استبدال sin(30), cos(60), tan(45)
+            expr = re.sub(r'(sin|cos|tan)\((\d+)\)', replace_trig, expr)
+            
+            # معالجة sin²(30) + cos²(30)
+            expr = re.sub(r'sin²\((\d+)\)', r'(sin(\1))**2', expr)
+            expr = re.sub(r'cos²\((\d+)\)', r'(cos(\1))**2', expr)
+            expr = re.sub(r'tan²\((\d+)\)', r'(tan(\1))**2', expr)
+            
+            # معالجة المضروب (4! -> math.factorial(4))
+            expr = re.sub(r'(\d+)!', r'math.factorial(\1)', expr)
+            
+            # معالجة اللوغاريتم الطبيعي (ln(10) -> math.log(10))
+            expr = re.sub(r'ln\(([^)]+)\)', r'math.log(\1)', expr)
+            
+            # معالجة اللوغاريتم العشري (log10(100) -> math.log10(100))
+            expr = re.sub(r'log10\(([^)]+)\)', r'math.log10(\1)', expr)
             
             # تقييم آمن
             result = eval(expr, {"__builtins__": {}}, math.__dict__)
             self.last_result = result
+            
+            # تنسيق النتيجة
+            if isinstance(result, float):
+                if result.is_integer():
+                    return int(result)
+                return round(result, 6)
             return result
+            
         except Exception as e:
-            return f"خطأ: {e}"
+            return f"خطأ: {str(e)}"
     
-    # ========== حل المعادلات (نسخة محسنة) ==========
+    # ========== حل المعادلات (محسنة للمعادلات التكعيبية) ==========
     
     def solve_equation(self, equation: str):
-        """حل جميع أنواع المعادلات - نسخة محسنة"""
+        """حل جميع أنواع المعادلات - مع دعم التكعيبية والرباعية"""
         try:
             if '=' not in equation:
                 return "المعادلة يجب أن تحتوي على علامة ="
@@ -40,9 +76,10 @@ class Calculator:
             
             # ===== تحويل الرموز الخاصة =====
             modified = equation
-            modified = modified.replace('²', '**2').replace('³', '**3')
+            modified = modified.replace('²', '**2').replace('³', '**3').replace('⁴', '**4')
             modified = modified.replace('^', '**')
             modified = modified.replace(' ', '')
+            modified = modified.replace('√', 'sqrt')
             
             # ===== معالجة القيمة المطلقة =====
             if '|' in modified:
@@ -51,14 +88,13 @@ class Calculator:
             # ===== استيراد sympy =====
             try:
                 from sympy import symbols, Eq, solve, sympify, N
-                from sympy import Abs
+                from sympy import Abs, sqrt
             except ImportError:
                 return "خطأ: مكتبة sympy غير مثبتة. قم بتشغيل: pip install sympy"
             
             x = symbols('x')
             
             # ===== فصل طرفي المعادلة =====
-            # معالجة الحالة التي يكون فيها الطرف الأيمن مجرد رقم
             if '=' in modified:
                 left, right = modified.split('=', 1)
             else:
@@ -73,17 +109,12 @@ class Calculator:
             left = re.sub(r'([a-zA-Z])(\d+)', r'\1*\2', left)
             right = re.sub(r'([a-zA-Z])(\d+)', r'\1*\2', right)
             
-            # معالجة خاصة للمعادلات التي فيها x في الطرفين
-            # مثل: 5x + 3 = 2x + 9
-            left = left.replace('+', ' +').replace('-', ' -')
-            right = right.replace('+', ' +').replace('-', ' -')
-            
             # ===== تحويل النصوص إلى تعابير رياضية =====
             try:
                 left_expr = sympify(left)
                 right_expr = sympify(right)
             except Exception as e:
-                # محاولة ثانية بمعالجة مختلفة
+                # محاولة ثانية
                 left = left.replace('**', '^').replace('^', '**')
                 right = right.replace('**', '^').replace('^', '**')
                 left_expr = sympify(left)
@@ -96,19 +127,16 @@ class Calculator:
             if not solutions:
                 return "لا يوجد حل"
             
-            # ===== تنسيق النتائج بشكل جميل =====
+            # ===== تنسيق النتائج =====
             formatted_solutions = []
             for sol in solutions:
-                # تحويل الحلول إلى أعداد عشرية
                 if sol.is_real:
                     try:
                         val = float(N(sol))
-                        # إذا كان الحل صحيحاً (1.0 → 1)
                         if abs(val - round(val)) < 1e-10:
                             formatted_solutions.append(str(int(round(val))))
                         else:
-                            # تقريب إلى 3 منازل عشرية
-                            rounded = round(val, 3)
+                            rounded = round(val, 4)
                             if abs(rounded - round(rounded)) < 1e-10:
                                 formatted_solutions.append(str(int(round(rounded))))
                             else:
@@ -116,7 +144,6 @@ class Calculator:
                     except:
                         formatted_solutions.append(str(sol))
                 else:
-                    # حلول مركبة
                     formatted_solutions.append(str(sol).replace('I', 'i'))
             
             # ===== إرجاع النتيجة =====
@@ -130,28 +157,47 @@ class Calculator:
         except Exception as e:
             return f"خطأ في حل المعادلة: {str(e)}"
     
-    # ========== دوال مساعدة للمعادلات الخاصة ==========
+    # ========== دوال مساعدة ==========
     
-    def solve_quadratic(self, a, b, c):
-        """حل معادلة تربيعية: ax² + bx + c = 0"""
-        try:
-            discriminant = b**2 - 4*a*c
-            
-            if discriminant > 0:
-                x1 = (-b + math.sqrt(discriminant)) / (2*a)
-                x2 = (-b - math.sqrt(discriminant)) / (2*a)
-                return [x1, x2]
-            elif discriminant == 0:
-                x = -b / (2*a)
-                return [x]
-            else:
-                real = -b / (2*a)
-                imag = math.sqrt(-discriminant) / (2*a)
-                return [complex(real, imag), complex(real, -imag)]
-        except:
-            return None
+    def sin(self, angle):
+        """جيب الزاوية (الزاوية بالدرجات)"""
+        return math.sin(math.radians(angle))
     
-    # ========== عمليات منفصلة (للويب) ==========
+    def cos(self, angle):
+        """جيب تمام الزاوية (الزاوية بالدرجات)"""
+        return math.cos(math.radians(angle))
+    
+    def tan(self, angle):
+        """ظل الزاوية (الزاوية بالدرجات)"""
+        return math.tan(math.radians(angle))
+    
+    def factorial(self, n):
+        """مضروب العدد"""
+        return math.factorial(int(n))
+    
+    def ln(self, a):
+        """اللوغاريتم الطبيعي"""
+        if a <= 0:
+            return "خطأ: اللوغاريتم الطبيعي غير معرف للأعداد السالبة أو الصفر"
+        return math.log(a)
+    
+    def log10(self, a):
+        """اللوغاريتم العشري"""
+        if a <= 0:
+            return "خطأ: اللوغاريتم غير معرف للأعداد السالبة أو الصفر"
+        return math.log10(a)
+    
+    def sqrt(self, a):
+        """الجذر التربيعي"""
+        if a < 0:
+            return "خطأ: جذر تربيعي لعدد سالب"
+        return math.sqrt(a)
+    
+    def cbrt(self, a):
+        """الجذر التكعيبي"""
+        return math.copysign(abs(a) ** (1/3), a)
+    
+    # ========== العمليات الأساسية ==========
     
     def add(self, a, b):
         return a + b
@@ -169,39 +215,6 @@ class Calculator:
     
     def power(self, a, b):
         return a ** b
-    
-    def sqrt(self, a):
-        if a < 0:
-            return "خطأ: جذر تربيعي لعدد سالب"
-        return a ** 0.5
-    
-    def cbrt(self, a):
-        if a >= 0:
-            return a ** (1/3)
-        else:
-            return -((-a) ** (1/3))
-    
-    def sin(self, angle):
-        return math.sin(math.radians(angle))
-    
-    def cos(self, angle):
-        return math.cos(math.radians(angle))
-    
-    def tan(self, angle):
-        return math.tan(math.radians(angle))
-    
-    def factorial(self, n):
-        return math.factorial(int(n))
-    
-    def log10(self, a):
-        if a <= 0:
-            return "خطأ: اللوغاريتم غير معرف للأعداد السالبة أو الصفر"
-        return math.log10(a)
-    
-    def ln(self, a):
-        if a <= 0:
-            return "خطأ: اللوغاريتم الطبيعي غير معرف للأعداد السالبة أو الصفر"
-        return math.log(a)
     
     # ========== الذاكرة ==========
     
