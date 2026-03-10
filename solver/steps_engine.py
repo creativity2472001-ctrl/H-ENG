@@ -25,11 +25,12 @@ def format_number(num) -> str:
         return str(num)
 
 def extract_coefficients_from_quadratic(equation: str):
-    """استخراج معاملات المعادلة التربيعية باستخدام sympy"""
+    """استخراج معاملات المعادلة التربيعية باستخدام sympy (محسنة)"""
     x = symbols('x')
     
-    # تنظيف المعادلة
+    # تنظيف المعادلة - معالجة الشرطة الطويلة والرموز الخاصة
     clean_eq = equation.replace('²', '**2').replace('^', '**').replace(' ', '')
+    clean_eq = clean_eq.replace('−', '-')  # معالجة شرطة طويلة
     
     if '=' in clean_eq:
         left, right = clean_eq.split('=')
@@ -40,18 +41,27 @@ def extract_coefficients_from_quadratic(equation: str):
         
         # تحويل 2x إلى 2*x
         left = re.sub(r'(\d+)([a-zA-Z])', r'\1*\2', left)
+        left = re.sub(r'([a-zA-Z])(\d+)', r'\1*\2', left)
         
-        # إنشاء التعبير
-        expr = sympify(f"({left}) - ({right_val})")
-        expanded = expr.expand()
+        # معالجة خاصة للصيغ مثل 4x²
+        left = left.replace('x**2', 'x**2')
         
-        # استخراج المعاملات
-        coeff_dict = expanded.as_coefficients_dict()
-        a = float(coeff_dict.get(x**2, 0))
-        b = float(coeff_dict.get(x, 0))
-        c = float(coeff_dict.get(1, 0))
-        
-        return a, b, c
+        try:
+            # إنشاء التعبير
+            expr_str = f"({left}) - ({right_val})"
+            expr = sympify(expr_str)
+            expanded = expr.expand()
+            
+            # استخراج المعاملات
+            coeff_dict = expanded.as_coefficients_dict()
+            a = float(coeff_dict.get(x**2, 0))
+            b = float(coeff_dict.get(x, 0))
+            c = float(coeff_dict.get(1, 0))
+            
+            return a, b, c
+        except Exception as e:
+            logger.error(f"خطأ في استخراج المعاملات: {e}")
+            return 0, 0, 0
     return 0, 0, 0
 
 # ===== دالة جديدة للمعادلات التكعيبية =====
@@ -67,10 +77,12 @@ def solve_cubic_with_steps(equation: str) -> dict:
         
         # تنظيف المعادلة
         clean_eq = equation.replace('³', '**3').replace('^3', '**3').replace(' ', '')
+        clean_eq = clean_eq.replace('−', '-')
         left, right = clean_eq.split('=')
         
         # تحويل 2x إلى 2*x
         left = re.sub(r'(\d+)([a-zA-Z])', r'\1*\2', left)
+        left = re.sub(r'([a-zA-Z])(\d+)', r'\1*\2', left)
         
         steps.append("📐 **الخطوة 1: كتابة المعادلة بالصورة القياسية**")
         steps.append(f"   {left} = {right}")
@@ -155,46 +167,81 @@ def solve_cubic_with_steps(equation: str) -> dict:
             "result": None
         }
 
-# ===== دالة جديدة للمعادلات الرباعية ثنائية التربيع =====
+# ===== دالة محسنة للمعادلات الرباعية ثنائية التربيع =====
 def solve_quartic_biquadratic_with_steps(equation: str) -> dict:
-    """حل معادلة رباعية ثنائية التربيع: ax⁴ + bx² + c = 0"""
+    """حل معادلة رباعية ثنائية التربيع: ax⁴ + bx² + c = 0 (محسنة)"""
     steps = []
     steps.append("📌 **السؤال:** " + equation)
     steps.append("")
     
     try:
-        from sympy import symbols, Eq, solve, sympify
+        from sympy import symbols, Eq, solve, sympify, N
         x = symbols('x')
         
-        # تنظيف المعادلة
+        # تنظيف المعادلة - معالجة الشرطة والرموز
         clean_eq = equation.replace('⁴', '**4').replace('²', '**2').replace(' ', '')
-        left, right = clean_eq.split('=')
+        clean_eq = clean_eq.replace('−', '-')
+        
+        if '=' in clean_eq:
+            left, right = clean_eq.split('=')
+            try:
+                right_val = float(right)
+            except:
+                right_val = 0
+        else:
+            return {"success": False, "error": "صيغة غير صحيحة"}
+        
+        # تحويل 2x إلى 2*x
+        left = re.sub(r'(\d+)([a-zA-Z])', r'\1*\2', left)
+        left = re.sub(r'([a-zA-Z])(\d+)', r'\1*\2', left)
         
         steps.append("📐 **الخطوة 1: نعوض t = x²**")
         steps.append(f"   تصبح المعادلة: at² + bt + c = 0")
         steps.append("")
         
-        # إنشاء المعادلة
-        left_expr = sympify(left)
-        right_expr = sympify(right)
-        eq = Eq(left_expr, right_expr)
-        
-        # حل المعادلة
-        solutions = solve(eq, x)
-        sol_list = [float(N(s)) for s in solutions if s.is_real]
-        
-        steps.append("📐 **الخطوة 2: الحلول**")
-        for i, sol in enumerate(sol_list, 1):
-            steps.append(f"   x{i} = {format_number(sol)}")
-        
-        result = f"x = {', '.join([format_number(s) for s in sol_list])}"
-        steps.append(f"✅ **الإجابة النهائية:** {result}")
-        
-        return {
-            "success": True,
-            "steps": steps,
-            "result": result
-        }
+        try:
+            # إنشاء التعبير
+            expr_str = f"({left}) - ({right_val})"
+            expr = sympify(expr_str)
+            
+            # حل المعادلة
+            solutions = solve(expr, x)
+            
+            # تصفية الحلول الحقيقية
+            sol_list = []
+            for s in solutions:
+                try:
+                    val = float(N(s))
+                    if abs(val.imag) < 1e-10 if hasattr(val, 'imag') else True:
+                        sol_list.append(float(s))
+                except:
+                    pass
+            
+            steps.append("📐 **الخطوة 2: الحلول**")
+            for i, sol in enumerate(sol_list, 1):
+                steps.append(f"   x{i} = {format_number(sol)}")
+            
+            if len(sol_list) == 4:
+                result = f"x = ±{format_number(abs(sol_list[0]))} أو x = ±{format_number(abs(sol_list[2]))}"
+            elif len(sol_list) == 2:
+                result = f"x = ±{format_number(abs(sol_list[0]))}"
+            else:
+                result = f"x = {', '.join([format_number(s) for s in sol_list])}"
+            
+            steps.append(f"✅ **الإجابة النهائية:** {result}")
+            
+            return {
+                "success": True,
+                "steps": steps,
+                "result": result
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "steps": [f"❌ حدث خطأ في الحل: {e}"],
+                "result": None
+            }
         
     except Exception as e:
         logger.error(f"خطأ في حل المعادلة الرباعية: {e}")
@@ -333,7 +380,7 @@ def solve_radical_with_steps(equation: str) -> dict:
         }
 
 def solve_quadratic_with_steps(equation: str) -> dict:
-    """حل معادلة تربيعية مع خطوات"""
+    """حل معادلة تربيعية مع خطوات (محسنة)"""
     steps = []
     steps.append("📌 **السؤال:** " + equation)
     steps.append("")
@@ -664,15 +711,15 @@ def solve_with_steps(expression: str) -> dict:
             elif len(eqs) == 3:
                 return solve_system_3x3_with_steps(eqs[0], eqs[1], eqs[2])
     
-    # 3. معادلات تكعيبية (جديدة)
+    # 3. معادلات تكعيبية
     if ('x³' in expression or 'x^3' in expression) and '=' in expression:
         return solve_cubic_with_steps(expression)
     
-    # 4. معادلات رباعية ثنائية التربيع (جديدة)
-    if ('x⁴' in expression or 'x**4' in expression) and 'x²' in expression and '=' in expression:
+    # 4. معادلات رباعية ثنائية التربيع
+    if ('x⁴' in expression or 'x**4' in expression) and ('x²' in expression or 'x**2' in expression) and '=' in expression:
         return solve_quartic_biquadratic_with_steps(expression)
     
-    # 5. معادلات جذرية (جديدة)
+    # 5. معادلات جذرية
     if '√' in expression and '=' in expression:
         return solve_radical_with_steps(expression)
     
