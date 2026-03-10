@@ -20,7 +20,6 @@ class Calculator:
             expr = expr.replace('²', '**2').replace('³', '**3').replace('⁴', '**4')
             
             # ===== إصلاح المشكلة 1: تحويل ^ إلى ** (الأس) =====
-            # يجب أن يتم قبل معالجة الدوال المثلثية
             expr = re.sub(r'(\d+)\s*\^\s*(\d+)', r'\1**\2', expr)
             expr = re.sub(r'([a-zA-Z])\s*\^\s*(\d+)', r'\1**\2', expr)
             
@@ -41,23 +40,26 @@ class Calculator:
             expr = re.sub(r'(sin|cos|tan)\((\d+)\)', replace_trig, expr)
             
             # ===== إصلاح المشكلة 2: sin²(30) + cos²(30) =====
-            # هذه تحتاج معالجة خاصة قبل تحويل sin²
-            def replace_sin_sq(match):
-                angle = match.group(1)
-                return f'({math.sin(math.radians(float(angle)))})**2'
+            # طريقة مباشرة: حساب القيمة ثم إرجاع النص
+            def replace_sin_sq_direct(match):
+                angle = int(match.group(1))
+                val = math.sin(math.radians(angle))
+                return str(val * val)  # مباشرة نرجعالقيمة المربعة
             
-            def replace_cos_sq(match):
-                angle = match.group(1)
-                return f'({math.cos(math.radians(float(angle)))})**2'
+            def replace_cos_sq_direct(match):
+                angle = int(match.group(1))
+                val = math.cos(math.radians(angle))
+                return str(val * val)
             
-            def replace_tan_sq(match):
-                angle = match.group(1)
-                return f'({math.tan(math.radians(float(angle)))})**2'
+            def replace_tan_sq_direct(match):
+                angle = int(match.group(1))
+                val = math.tan(math.radians(angle))
+                return str(val * val)
             
-            # معالجة sin²(30) مباشرة
-            expr = re.sub(r'sin²\((\d+)\)', replace_sin_sq, expr)
-            expr = re.sub(r'cos²\((\d+)\)', replace_cos_sq, expr)
-            expr = re.sub(r'tan²\((\d+)\)', replace_tan_sq, expr)
+            # معالجة sin²(30), cos²(30), tan²(45) مباشرة
+            expr = re.sub(r'sin²\((\d+)\)', replace_sin_sq_direct, expr)
+            expr = re.sub(r'cos²\((\d+)\)', replace_cos_sq_direct, expr)
+            expr = re.sub(r'tan²\((\d+)\)', replace_tan_sq_direct, expr)
             
             # معالجة المضروب (4! -> math.factorial(4))
             expr = re.sub(r'(\d+)!', r'math.factorial(\1)', expr)
@@ -69,7 +71,6 @@ class Calculator:
             expr = re.sub(r'log10\(([^)]+)\)', r'math.log10(\1)', expr)
             
             # ===== التعديل المهم: إضافة math إلى المتغيرات المسموحة =====
-            # إنشاء قاموس المتغيرات المسموحة
             allowed_names = {
                 k: v for k, v in math.__dict__.items() if not k.startswith("__")
             }
