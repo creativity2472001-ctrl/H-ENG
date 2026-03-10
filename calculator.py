@@ -49,8 +49,15 @@ class Calculator:
             # معالجة اللوغاريتم العشري (log10(100) -> math.log10(100))
             expr = re.sub(r'log10\(([^)]+)\)', r'math.log10(\1)', expr)
             
+            # ===== التعديل المهم: إضافة math إلى المتغيرات المسموحة =====
+            # إنشاء قاموس المتغيرات المسموحة
+            allowed_names = {
+                k: v for k, v in math.__dict__.items() if not k.startswith("__")
+            }
+            allowed_names["math"] = math  # إضافة math نفسه
+            
             # تقييم آمن
-            result = eval(expr, {"__builtins__": {}}, math.__dict__)
+            result = eval(expr, {"__builtins__": {}}, allowed_names)
             self.last_result = result
             
             # تنسيق النتيجة
