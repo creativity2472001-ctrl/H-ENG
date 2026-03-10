@@ -19,6 +19,11 @@ class Calculator:
             expr = expr.replace('√', 'sqrt')
             expr = expr.replace('²', '**2').replace('³', '**3').replace('⁴', '**4')
             
+            # ===== إصلاح المشكلة 1: تحويل ^ إلى ** (الأس) =====
+            # يجب أن يتم قبل معالجة الدوال المثلثية
+            expr = re.sub(r'(\d+)\s*\^\s*(\d+)', r'\1**\2', expr)
+            expr = re.sub(r'([a-zA-Z])\s*\^\s*(\d+)', r'\1**\2', expr)
+            
             # معالجة الدوال المثلثية (تحويل الدرجات إلى راديان)
             def replace_trig(match):
                 func = match.group(1)  # sin, cos, tan
@@ -35,10 +40,24 @@ class Calculator:
             # استبدال sin(30), cos(60), tan(45)
             expr = re.sub(r'(sin|cos|tan)\((\d+)\)', replace_trig, expr)
             
-            # معالجة sin²(30) + cos²(30)
-            expr = re.sub(r'sin²\((\d+)\)', r'(sin(\1))**2', expr)
-            expr = re.sub(r'cos²\((\d+)\)', r'(cos(\1))**2', expr)
-            expr = re.sub(r'tan²\((\d+)\)', r'(tan(\1))**2', expr)
+            # ===== إصلاح المشكلة 2: sin²(30) + cos²(30) =====
+            # هذه تحتاج معالجة خاصة قبل تحويل sin²
+            def replace_sin_sq(match):
+                angle = match.group(1)
+                return f'({math.sin(math.radians(float(angle)))})**2'
+            
+            def replace_cos_sq(match):
+                angle = match.group(1)
+                return f'({math.cos(math.radians(float(angle)))})**2'
+            
+            def replace_tan_sq(match):
+                angle = match.group(1)
+                return f'({math.tan(math.radians(float(angle)))})**2'
+            
+            # معالجة sin²(30) مباشرة
+            expr = re.sub(r'sin²\((\d+)\)', replace_sin_sq, expr)
+            expr = re.sub(r'cos²\((\d+)\)', replace_cos_sq, expr)
+            expr = re.sub(r'tan²\((\d+)\)', replace_tan_sq, expr)
             
             # معالجة المضروب (4! -> math.factorial(4))
             expr = re.sub(r'(\d+)!', r'math.factorial(\1)', expr)
