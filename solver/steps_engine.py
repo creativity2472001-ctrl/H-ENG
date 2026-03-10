@@ -59,9 +59,9 @@ def extract_coefficients_from_quadratic(equation: str):
         pass
     return 0, 0, 0
 
-# ===== دالة للمعادلات التكعيبية =====
+# ===== دالة للمعادلات التكعيبية - نسخة مبسطة =====
 def solve_cubic_with_steps(equation: str) -> dict:
-    """حل معادلة تكعيبية مع خطوات"""
+    """حل معادلة تكعيبية مع خطوات - نسخة مبسطة"""
     steps = []
     steps.append("📌 **السؤال:** " + equation)
     steps.append("")
@@ -77,41 +77,46 @@ def solve_cubic_with_steps(equation: str) -> dict:
         # تحويل 2x إلى 2*x
         left = re.sub(r'(\d+)([a-zA-Z])', r'\1*\2', left)
         
-        steps.append("📐 **الخطوة 1: كتابة المعادلة بالصورة القياسية**")
-        steps.append(f"   {left} = {right}")
-        steps.append("")
-        
         # إنشاء المعادلة
         left_expr = sympify(left)
         right_expr = sympify(right)
         eq = Eq(left_expr, right_expr)
         
-        # حل المعادلة مباشرة باستخدام sympy
+        # حل المعادلة
         solutions = solve(eq, x)
         
-        # تنسيق الحلول
+        # تحويل الحلول إلى أعداد عشرية بسيطة
         sol_list = []
         for s in solutions:
             try:
-                if s.is_real:
-                    sol_list.append(float(N(s)))
+                val = float(N(s))
+                # تقريب الحلول إلى أعداد بسيطة
+                if abs(val - round(val)) < 1e-10:
+                    sol_list.append(str(int(round(val))))
                 else:
-                    sol_list.append(str(s))
+                    rounded = round(val, 3)
+                    if abs(rounded - round(rounded)) < 1e-10:
+                        sol_list.append(str(int(round(rounded))))
+                    else:
+                        sol_list.append(str(rounded).rstrip('0').rstrip('.'))
             except:
+                # إذا فشل التحويل، نعرض الحل كما هو
                 sol_list.append(str(s))
         
-        steps.append("📐 **الخطوة 2: الحلول**")
+        steps.append("📐 **الخطوة 1: حل المعادلة**")
         for i, sol in enumerate(sol_list, 1):
-            if isinstance(sol, float):
-                steps.append(f"   x{i} = {format_number(sol)}")
-            else:
-                steps.append(f"   x{i} = {sol}")
+            steps.append(f"   x{i} = {sol}")
         
         if len(sol_list) == 3:
-            result = f"x = {format_number(sol_list[0])} أو x = {format_number(sol_list[1])} أو x = {format_number(sol_list[2])}"
+            result = f"x = {sol_list[0]} أو x = {sol_list[1]} أو x = {sol_list[2]}"
+        elif len(sol_list) == 2:
+            result = f"x = {sol_list[0]} أو x = {sol_list[1]}"
+        elif len(sol_list) == 1:
+            result = f"x = {sol_list[0]}"
         else:
-            result = f"x = {sol_list}"
+            result = f"x = {', '.join(sol_list)}"
         
+        steps.append("")
         steps.append(f"✅ **الإجابة النهائية:** {result}")
         
         return {
