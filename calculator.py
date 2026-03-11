@@ -40,26 +40,23 @@ class Calculator:
             expr = re.sub(r'(sin|cos|tan)\((\d+)\)', replace_trig, expr)
             
             # ===== إصلاح المشكلة 2: sin²(30) + cos²(30) =====
-            # طريقة مباشرة: حساب القيمة ثم إرجاع النص
-            def replace_sin_sq_direct(match):
-                angle = int(match.group(1))
-                val = math.sin(math.radians(angle))
-                return str(val ** 2)  # ✅ تم التعديل هنا
-            
-            def replace_cos_sq_direct(match):
-                angle = int(match.group(1))
-                val = math.cos(math.radians(angle))
-                return str(val ** 2)  # ✅ تم التعديل هنا
-            
-            def replace_tan_sq_direct(match):
-                angle = int(match.group(1))
-                val = math.tan(math.radians(angle))
-                return str(val ** 2)  # ✅ تم التعديل هنا
-            
-            # معالجة sin²(30), cos²(30), tan²(45) مباشرة
-            expr = re.sub(r'sin²\((\d+)\)', replace_sin_sq_direct, expr)
-            expr = re.sub(r'cos²\((\d+)\)', replace_cos_sq_direct, expr)
-            expr = re.sub(r'tan²\((\d+)\)', replace_tan_sq_direct, expr)
+            # تحويل sin²(30) إلى (sin(30))**2
+            def replace_sin_sq(match):
+                angle = match.group(1)
+                return f'(sin({angle}))**2'
+
+            def replace_cos_sq(match):
+                angle = match.group(1)
+                return f'(cos({angle}))**2'
+
+            def replace_tan_sq(match):
+                angle = match.group(1)
+                return f'(tan({angle}))**2'
+
+            # تحويل sin²(30), cos²(30), tan²(45) إلى الصيغة الصحيحة
+            expr = re.sub(r'sin²\((\d+)\)', replace_sin_sq, expr)
+            expr = re.sub(r'cos²\((\d+)\)', replace_cos_sq, expr)
+            expr = re.sub(r'tan²\((\d+)\)', replace_tan_sq, expr)
             
             # معالجة المضروب (4! -> math.factorial(4))
             expr = re.sub(r'(\d+)!', r'math.factorial(\1)', expr)
