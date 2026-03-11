@@ -8,6 +8,13 @@ from math_engine.algebra.algebra_part1 import CompleteAlgebraSolver
 from math_engine.algebra.algebra_part2 import IntermediateAlgebraSolver
 from math_engine.algebra.algebra_part3 import AdvancedAlgebraSolver
 
+# ===== استيراد محركات التفاضل والتكامل (جديد) =====
+from math_engine.calculus import (
+    CalculusSolverPart1,
+    CalculusSolverPart2,
+    CalculusSolverPart3
+)
+
 # استيراد محرك الخطوات (مهم جداً)
 from .steps_engine import solve_with_steps
 
@@ -18,6 +25,11 @@ calc = Calculator()
 solver1 = CompleteAlgebraSolver()
 solver2 = IntermediateAlgebraSolver()
 solver3 = AdvancedAlgebraSolver()
+
+# ===== تهيئة كائنات التفاضل والتكامل (جديد) =====
+calc1 = CalculusSolverPart1()  # للمشتقات
+calc2 = CalculusSolverPart2()  # للتكاملات
+calc3 = CalculusSolverPart3()  # للحدود والمعادلات التفاضلية
 
 # ===== دوال مساعدة =====
 def format_number(num: float) -> str:
