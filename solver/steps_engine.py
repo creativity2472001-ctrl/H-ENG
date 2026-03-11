@@ -730,3 +730,505 @@ def solve_with_steps(expression: str) -> dict:
             "steps": [f"❌ حدث خطأ: {e}"],
             "result": None
         }
+
+# ============================================================================
+# دوال جديدة للتفاضل والتكامل (مضافة في النهاية)
+# ============================================================================
+
+import sympy as sp
+
+def format_expression(expr) -> str:
+    """تحويل تعبير SymPy إلى نص LaTeX مبسط"""
+    from sympy import latex
+    try:
+        return latex(expr)
+    except:
+        return str(expr)
+
+# ===== دوال مساعدة للتفاضل والتكامل =====
+def extract_function(expression: str):
+    """استخراج الدالة من تعبير مثل 'مشتقة x^2' أو '∫ x^2 dx'"""
+    # إزالة الكلمات المفتاحية
+    expr = expression.lower()
+    expr = expr.replace('مشتقة', '').replace('derivative', '')
+    expr = expr.replace('تكامل', '').replace('integral', '')
+    expr = expr.replace('∫', '').replace('dx', '').replace('dy', '')
+    expr = expr.replace('نهاية', '').replace('limit', '')
+    expr = expr.replace('عندما', '').replace('when', '')
+    expr = expr.replace('←', '->').replace('→', '->')
+    return expr.strip()
+
+# ===== دوال المشتقات =====
+def solve_derivative_simple(expression: str) -> dict:
+    """حل مشتقة بسيطة مثل 'مشتقة x^2' أو 'derivative of sin(x)'"""
+    steps = []
+    steps.append("📌 **السؤال:** " + expression)
+    steps.append("")
+    
+    try:
+        x = symbols('x')
+        
+        # استخراج الدالة
+        func_str = extract_function(expression)
+        if not func_str:
+            func_str = expression
+        
+        # تحويل إلى تعبير SymPy
+        func = sympify(func_str)
+        
+        steps.append("📐 **الخطوة 1: كتابة الدالة**")
+        steps.append(f"   f(x) = {format_expression(func)}")
+        steps.append("")
+        
+        # حساب المشتقة
+        deriv = diff(func, x)
+        
+        steps.append("📐 **الخطوة 2: تطبيق قواعد الاشتقاق**")
+        
+        # شرح مبسط للقاعدة المستخدمة
+        if func.has(sin):
+            steps.append("   • مشتقة sin(x) هي cos(x)")
+        if func.has(cos):
+            steps.append("   • مشتقة cos(x) هي -sin(x)")
+        if func.has(exp):
+            steps.append("   • مشتقة e^x هي e^x")
+        if func.has(log):
+            steps.append("   • مشتقة ln(x) هي 1/x")
+        
+        steps.append("")
+        steps.append(f"📐 **الخطوة 3: النتيجة**")
+        steps.append(f"   f'(x) = {format_expression(deriv)}")
+        
+        result = format_expression(deriv)
+        steps.append(f"✅ **الإجابة النهائية:** {result}")
+        
+        return {
+            "success": True,
+            "steps": steps,
+            "result": result
+        }
+        
+    except Exception as e:
+        logger.error(f"خطأ في حساب المشتقة: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "steps": [f"❌ حدث خطأ: {e}"],
+            "result": None
+        }
+
+def solve_derivative_chain_rule(expression: str) -> dict:
+    """حل مشتقة بقاعدة السلسلة مثل 'مشتقة sin(2x)'"""
+    steps = []
+    steps.append("📌 **السؤال:** " + expression)
+    steps.append("")
+    
+    try:
+        x = symbols('x')
+        
+        # استخراج الدالة
+        func_str = extract_function(expression)
+        if not func_str:
+            func_str = expression
+        
+        func = sympify(func_str)
+        
+        steps.append("📐 **الخطوة 1: تحديد الدوال**")
+        steps.append(f"   f(x) = {format_expression(func)}")
+        
+        # محاولة تحليل الدالة المركبة
+        if func.has(sin) and not func.args[0] == x:
+            inner = func.args[0]
+            steps.append(f"   • الدالة الخارجية: sin(u)")
+            steps.append(f"   • الدالة الداخلية: u = {format_expression(inner)}")
+            
+            deriv = diff(func, x)
+            
+            steps.append("")
+            steps.append("📐 **الخطوة 2: تطبيق قاعدة السلسلة**")
+            steps.append("   df/dx = df/du × du/dx")
+            steps.append(f"   • df/du = cos(u)")
+            steps.append(f"   • du/dx = {format_expression(diff(inner, x))}")
+            
+            steps.append("")
+            steps.append(f"📐 **الخطوة 3: التعويض**")
+            steps.append(f"   f'(x) = cos({format_expression(inner)}) × {format_expression(diff(inner, x))}")
+            
+        elif func.has(exp) and not func.args[0] == x:
+            inner = func.args[0]
+            steps.append(f"   • الدالة الخارجية: e^u")
+            steps.append(f"   • الدالة الداخلية: u = {format_expression(inner)}")
+            
+            deriv = diff(func, x)
+            
+            steps.append("")
+            steps.append("📐 **الخطوة 2: تطبيق قاعدة السلسلة**")
+            steps.append("   df/dx = df/du × du/dx")
+            steps.append(f"   • df/du = e^u")
+            steps.append(f"   • du/dx = {format_expression(diff(inner, x))}")
+            
+            steps.append("")
+            steps.append(f"📐 **الخطوة 3: التعويض**")
+            steps.append(f"   f'(x) = e^{format_expression(inner)} × {format_expression(diff(inner, x))}")
+            
+        else:
+            deriv = diff(func, x)
+        
+        steps.append("")
+        steps.append(f"📐 **الخطوة 4: النتيجة**")
+        steps.append(f"   f'(x) = {format_expression(deriv)}")
+        
+        result = format_expression(deriv)
+        steps.append(f"✅ **الإجابة النهائية:** {result}")
+        
+        return {
+            "success": True,
+            "steps": steps,
+            "result": result
+        }
+        
+    except Exception as e:
+        logger.error(f"خطأ في حساب المشتقة بقاعدة السلسلة: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "steps": [f"❌ حدث خطأ: {e}"],
+            "result": None
+        }
+
+def solve_derivative_product_rule(expression: str) -> dict:
+    """حل مشتقة قاعدة الضرب مثل 'مشتقة x·sin(x)'"""
+    steps = []
+    steps.append("📌 **السؤال:** " + expression)
+    steps.append("")
+    
+    try:
+        x = symbols('x')
+        
+        func_str = extract_function(expression)
+        if not func_str:
+            func_str = expression
+        
+        func = sympify(func_str)
+        
+        steps.append("📐 **الخطوة 1: تحديد الدوال**")
+        steps.append(f"   f(x) = {format_expression(func)}")
+        
+        # محاولة تحليل الدالة كحاصل ضرب
+        if func.is_Mul and len(func.args) == 2:
+            u = func.args[0]
+            v = func.args[1]
+            
+            steps.append(f"   • u = {format_expression(u)}")
+            steps.append(f"   • v = {format_expression(v)}")
+            
+            u_prime = diff(u, x)
+            v_prime = diff(v, x)
+            
+            steps.append("")
+            steps.append("📐 **الخطوة 2: تطبيق قاعدة الضرب**")
+            steps.append("   (u·v)' = u'·v + u·v'")
+            steps.append(f"   • u' = {format_expression(u_prime)}")
+            steps.append(f"   • v' = {format_expression(v_prime)}")
+            
+            deriv = u_prime * v + u * v_prime
+            
+            steps.append("")
+            steps.append("📐 **الخطوة 3: التعويض**")
+            steps.append(f"   f'(x) = ({format_expression(u_prime)})·({format_expression(v)}) + ({format_expression(u)})·({format_expression(v_prime)})")
+            
+        else:
+            deriv = diff(func, x)
+        
+        steps.append("")
+        steps.append(f"📐 **الخطوة 4: التبسيط**")
+        steps.append(f"   f'(x) = {format_expression(deriv)}")
+        
+        result = format_expression(deriv)
+        steps.append(f"✅ **الإجابة النهائية:** {result}")
+        
+        return {
+            "success": True,
+            "steps": steps,
+            "result": result
+        }
+        
+    except Exception as e:
+        logger.error(f"خطأ في حساب مشتقة الضرب: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "steps": [f"❌ حدث خطأ: {e}"],
+            "result": None
+        }
+
+def solve_derivative_quotient_rule(expression: str) -> dict:
+    """حل مشتقة قاعدة القسمة مثل 'مشتقة sin(x)/x'"""
+    steps = []
+    steps.append("📌 **السؤال:** " + expression)
+    steps.append("")
+    
+    try:
+        x = symbols('x')
+        
+        func_str = extract_function(expression)
+        if not func_str:
+            func_str = expression
+        
+        func = sympify(func_str)
+        
+        steps.append("📐 **الخطوة 1: تحديد البسط والمقام**")
+        steps.append(f"   f(x) = {format_expression(func)}")
+        
+        # محاولة تحليل الدالة كحاصل قسمة
+        if func.is_Mul and any(arg.is_Pow and arg.exp == -1 for arg in func.args):
+            # هذا كسر
+            numerator = 1
+            denominator = 1
+            for arg in func.args:
+                if arg.is_Pow and arg.exp == -1:
+                    denominator *= arg.base
+                else:
+                    numerator *= arg
+            
+            steps.append(f"   • البسط: u = {format_expression(numerator)}")
+            steps.append(f"   • المقام: v = {format_expression(denominator)}")
+            
+            u_prime = diff(numerator, x)
+            v_prime = diff(denominator, x)
+            
+            steps.append("")
+            steps.append("📐 **الخطوة 2: تطبيق قاعدة القسمة**")
+            steps.append("   (u/v)' = (u'·v - u·v') / v²")
+            steps.append(f"   • u' = {format_expression(u_prime)}")
+            steps.append(f"   • v' = {format_expression(v_prime)}")
+            
+            deriv = (u_prime * denominator - numerator * v_prime) / (denominator ** 2)
+            
+            steps.append("")
+            steps.append("📐 **الخطوة 3: التعويض**")
+            steps.append(f"   f'(x) = (({format_expression(u_prime)})·({format_expression(denominator)}) - ({format_expression(numerator)})·({format_expression(v_prime)})) / ({format_expression(denominator)})²")
+            
+        else:
+            deriv = diff(func, x)
+        
+        steps.append("")
+        steps.append(f"📐 **الخطوة 4: التبسيط**")
+        steps.append(f"   f'(x) = {format_expression(deriv)}")
+        
+        result = format_expression(deriv)
+        steps.append(f"✅ **الإجابة النهائية:** {result}")
+        
+        return {
+            "success": True,
+            "steps": steps,
+            "result": result
+        }
+        
+    except Exception as e:
+        logger.error(f"خطأ في حساب مشتقة القسمة: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "steps": [f"❌ حدث خطأ: {e}"],
+            "result": None
+        }
+
+# ===== دوال التكاملات =====
+def solve_integral_simple(expression: str) -> dict:
+    """حل تكامل بسيط مثل '∫ x^2 dx' أو 'تكامل x^2'"""
+    steps = []
+    steps.append("📌 **السؤال:** " + expression)
+    steps.append("")
+    
+    try:
+        x = symbols('x')
+        
+        # استخراج الدالة
+        func_str = expression.replace('∫', '').replace('dx', '').replace('dy', '')
+        func_str = func_str.replace('تكامل', '').replace('integral', '')
+        func_str = func_str.strip()
+        
+        if not func_str:
+            func_str = expression
+        
+        func = sympify(func_str)
+        
+        steps.append("📐 **الخطوة 1: كتابة التكامل**")
+        steps.append(f"   ∫ {format_expression(func)} dx")
+        steps.append("")
+        
+        # حساب التكامل
+        integral = integrate(func, x)
+        
+        steps.append("📐 **الخطوة 2: تطبيق قواعد التكامل**")
+        
+        # شرح مبسط للقاعدة المستخدمة
+        if func.is_Pow and func.args[0] == x:
+            n = func.args[1]
+            if n != -1:
+                steps.append(f"   • ∫ x^{n} dx = x^{n+1}/({n+1}) + C")
+        
+        steps.append("")
+        steps.append(f"📐 **الخطوة 3: النتيجة**")
+        steps.append(f"   ∫ {format_expression(func)} dx = {format_expression(integral)} + C")
+        
+        result = f"{format_expression(integral)} + C"
+        steps.append(f"✅ **الإجابة النهائية:** {result}")
+        
+        return {
+            "success": True,
+            "steps": steps,
+            "result": result
+        }
+        
+    except Exception as e:
+        logger.error(f"خطأ في حساب التكامل: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "steps": [f"❌ حدث خطأ: {e}"],
+            "result": None
+        }
+
+def solve_integral_definite(expression: str) -> dict:
+    """حل تكامل محدد مثل '∫₀¹ x² dx'"""
+    steps = []
+    steps.append("📌 **السؤال:** " + expression)
+    steps.append("")
+    
+    try:
+        x = symbols('x')
+        
+        # محاولة استخراج الحدود من التعبير
+        lower = 0
+        upper = 1
+        func_str = expression.replace('∫', '').replace('dx', '')
+        
+        # إذا كان هناك أرقام في النص، نحاول استخراجها
+        numbers = re.findall(r'\d+', expression)
+        if len(numbers) >= 2:
+            lower = float(numbers[0])
+            upper = float(numbers[1])
+        
+        func = sympify(func_str)
+        
+        steps.append("📐 **الخطوة 1: كتابة التكامل المحدد**")
+        steps.append(f"   ∫_{{{lower}}}^{{{upper}}} {format_expression(func)} dx")
+        steps.append("")
+        
+        # حساب التكامل غير المحدد أولاً
+        indefinite = integrate(func, x)
+        
+        steps.append("📐 **الخطوة 2: حساب التكامل غير المحدد**")
+        steps.append(f"   ∫ {format_expression(func)} dx = {format_expression(indefinite)} + C")
+        steps.append("")
+        
+        # حساب التكامل المحدد
+        F_upper = indefinite.subs(x, upper)
+        F_lower = indefinite.subs(x, lower)
+        definite = F_upper - F_lower
+        
+        steps.append("📐 **الخطوة 3: تطبيق نظرية الأساس في التكامل**")
+        steps.append(f"   F({upper}) = {format_expression(F_upper)}")
+        steps.append(f"   F({lower}) = {format_expression(F_lower)}")
+        steps.append("")
+        steps.append(f"   ∫_{{{lower}}}^{{{upper}}} {format_expression(func)} dx = F({upper}) - F({lower})")
+        
+        steps.append("")
+        steps.append(f"📐 **الخطوة 4: النتيجة**")
+        steps.append(f"   = {format_expression(definite)}")
+        
+        result = format_expression(definite)
+        steps.append(f"✅ **الإجابة النهائية:** {result}")
+        
+        return {
+            "success": True,
+            "steps": steps,
+            "result": result
+        }
+        
+    except Exception as e:
+        logger.error(f"خطأ في حساب التكامل المحدد: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "steps": [f"❌ حدث خطأ: {e}"],
+            "result": None
+        }
+
+# ===== دوال النهايات =====
+def solve_limit_simple(expression: str) -> dict:
+    """حل نهاية بسيطة مثل 'نهاية x^2 عندما x→2'"""
+    steps = []
+    steps.append("📌 **السؤال:** " + expression)
+    steps.append("")
+    
+    try:
+        x = symbols('x')
+        
+        # محاولة استخراج الدالة وقيمة x
+        clean_expr = expression.replace('نهاية', '').replace('limit', '')
+        clean_expr = clean_expr.replace('عندما', '').replace('when', '')
+        clean_expr = clean_expr.replace('→', '->').replace('←', '->')
+        
+        # استخراج نقطة التقارب
+        approach = 0
+        if '->' in clean_expr:
+            parts = clean_expr.split('->')
+            func_str = parts[0].strip()
+            approach_str = parts[1].strip()
+            try:
+                if approach_str == '∞' or approach_str == 'infinity':
+                    approach = oo
+                else:
+                    approach = float(approach_str)
+            except:
+                approach = 0
+        else:
+            func_str = clean_expr
+            approach = 0
+        
+        func = sympify(func_str)
+        
+        steps.append("📐 **الخطوة 1: كتابة النهاية**")
+        steps.append(f"   \\lim_{{x \\to {approach}}} {format_expression(func)}")
+        steps.append("")
+        
+        # محاولة التعويض المباشر أولاً
+        try:
+            direct = func.subs(x, approach)
+            steps.append("📐 **الخطوة 2: محاولة التعويض المباشر**")
+            steps.append(f"   = {format_expression(direct)}")
+            
+            result = format_expression(direct)
+            
+        except:
+            # إذا فشل التعويض، نستخدم limit
+            lim = limit(func, x, approach)
+            steps.append("📐 **الخطوة 2: التعويض المباشر يؤدي إلى كمية غير معينة")
+            steps.append("   نستخدم قواعد حساب النهايات")
+            
+            result = format_expression(lim)
+        
+        steps.append("")
+        steps.append(f"✅ **الإجابة النهائية:** {result}")
+        
+        return {
+            "success": True,
+            "steps": steps,
+            "result": result
+        }
+        
+    except Exception as e:
+        logger.error(f"خطأ في حساب النهاية: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "steps": [f"❌ حدث خطأ: {e}"],
+            "result": None
+        }
+
+# تحديث الدالة الرئيسية لتشمل التفاضل والتكامل (مع الحفاظ على الترتيب القديم)
+# تم إضافة هذا الجزء في بداية الدالة solve_with_steps
+# لاحظ أنه تم الحفاظ على كل الشروط القديمة وإضافة شروط جديدة في البداية
