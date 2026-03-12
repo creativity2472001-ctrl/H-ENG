@@ -2,7 +2,7 @@
 import logging
 import re
 import math
-from sympy import symbols, Eq, solve, sympify, N
+from sympy import symbols, Eq, solve, sympify, N, diff, integrate, limit, oo, sin, cos, tan, exp, log
 from calculator import Calculator
 
 logger = logging.getLogger(__name__)
@@ -643,99 +643,7 @@ def solve_system_2x2_with_steps(eq1: str, eq2: str) -> dict:
             "result": None
         }
 
-# ===== الدالة الرئيسية =====
-def solve_with_steps(expression: str) -> dict:
-    """الدالة الرئيسية - تحدد نوع المسألة وتوجهها للمعالج المناسب"""
-    
-    # 1. معادلات القيمة المطلقة
-    if '|' in expression and '=' in expression:
-        return solve_absolute_with_steps(expression)
-    
-    # 2. نظم المعادلات
-    if expression.startswith('[') and expression.endswith(']') and ',' in expression:
-        inner = expression[1:-1].strip()
-        if ',' in inner:
-            eqs = [e.strip() for e in inner.split(',')]
-            if len(eqs) == 2:
-                return solve_system_2x2_with_steps(eqs[0], eqs[1])
-            elif len(eqs) == 3:
-                return solve_system_3x3_with_steps(eqs[0], eqs[1], eqs[2])
-    
-    # 3. معادلات لوغاريتمية خاصة
-    if 'log₂' in expression and '=' in expression:
-        steps = []
-        steps.append("📌 **السؤال:** " + expression)
-        steps.append("")
-        steps.append("📐 **الخطوة 1: نحول اللوغاريتم إلى الصيغة الأسية")
-        steps.append("   log₂(x) = 4  ⇒  x = 2⁴")
-        steps.append("")
-        steps.append("📐 **الخطوة 2: نحسب 2⁴ = 16")
-        steps.append("✅ **الإجابة النهائية:** x = 16")
-        return {"success": True, "steps": steps, "result": "x = 16"}
-    
-    if 'log(x²)' in expression or 'log(x^2)' in expression and '=' in expression:
-        steps = []
-        steps.append("📌 **السؤال:** " + expression)
-        steps.append("")
-        steps.append("📐 **الخطوة 1: نستخدم خاصية اللوغاريتم: log(x²) = 2 log(x)")
-        steps.append("   2 log(x) = 2")
-        steps.append("")
-        steps.append("📐 **الخطوة 2: نقسم على 2")
-        steps.append("   log(x) = 1")
-        steps.append("")
-        steps.append("📐 **الخطوة 3: نحول للصيغة الأسية")
-        steps.append("   x = 10¹ = 10")
-        steps.append("✅ **الإجابة النهائية:** x = 10")
-        return {"success": True, "steps": steps, "result": "x = 10"}
-    
-    # 4. معادلات تكعيبية
-    if ('x³' in expression or 'x^3' in expression) and '=' in expression:
-        return solve_cubic_with_steps(expression)
-    
-    # 5. معادلات رباعية ثنائية التربيع
-    if ('x⁴' in expression or 'x**4' in expression) and ('x²' in expression or 'x**2' in expression) and '=' in expression:
-        return solve_quartic_biquadratic_with_steps(expression)
-    
-    # 6. معادلات جذرية
-    if '√' in expression and '=' in expression:
-        return solve_radical_with_steps(expression)
-    
-    # 7. معادلات تربيعية
-    if ('x²' in expression or 'x^2' in expression) and '=' in expression:
-        return solve_quadratic_with_steps(expression)
-    
-    # 8. معادلات خطية
-    if '=' in expression and 'x' in expression:
-        return solve_linear_with_steps(expression)
-    
-    # 9. عمليات حسابية
-    try:
-        steps = []
-        steps.append(f"📌 **العملية:** {expression}")
-        steps.append("")
-        
-        result = calc.calculate(expression)
-        
-        steps.append(f"✅ **النتيجة:** {result}")
-        
-        return {
-            "success": True,
-            "steps": steps,
-            "result": str(result)
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-            "steps": [f"❌ حدث خطأ: {e}"],
-            "result": None
-        }
-
-# ============================================================================
-# دوال جديدة للتفاضل والتكامل (مضافة في النهاية)
-# ============================================================================
-
-import sympy as sp
+# ===== دوال جديدة للتفاضل والتكامل =====
 
 def format_expression(expr) -> str:
     """تحويل تعبير SymPy إلى نص LaTeX مبسط"""
@@ -1229,6 +1137,104 @@ def solve_limit_simple(expression: str) -> dict:
             "result": None
         }
 
-# تحديث الدالة الرئيسية لتشمل التفاضل والتكامل (مع الحفاظ على الترتيب القديم)
-# تم إضافة هذا الجزء في بداية الدالة solve_with_steps
-# لاحظ أنه تم الحفاظ على كل الشروط القديمة وإضافة شروط جديدة في البداية
+# ===== الدالة الرئيسية (محدثة) =====
+def solve_with_steps(expression: str) -> dict:
+    """الدالة الرئيسية - تحدد نوع المسألة وتوجهها للمعالج المناسب"""
+    
+    # ===== 0. أولاً: التفاضل والتكامل =====
+    if 'مشتقة' in expression or 'derivative' in expression:
+        func_part = expression.replace('مشتقة', '').replace('derivative', '').strip()
+        if func_part:
+            return solve_derivative_simple(func_part)
+        else:
+            return solve_derivative_simple(expression)
+    
+    if '∫' in expression or 'تكامل' in expression or 'integral' in expression:
+        return solve_integral_simple(expression)
+    
+    if 'نهاية' in expression or 'limit' in expression or 'lim' in expression:
+        return solve_limit_simple(expression)
+    
+    # ===== 1. معادلات القيمة المطلقة =====
+    if '|' in expression and '=' in expression:
+        return solve_absolute_with_steps(expression)
+    
+    # ===== 2. نظم المعادلات =====
+    if expression.startswith('[') and expression.endswith(']') and ',' in expression:
+        inner = expression[1:-1].strip()
+        if ',' in inner:
+            eqs = [e.strip() for e in inner.split(',')]
+            if len(eqs) == 2:
+                return solve_system_2x2_with_steps(eqs[0], eqs[1])
+            elif len(eqs) == 3:
+                return solve_system_3x3_with_steps(eqs[0], eqs[1], eqs[2])
+    
+    # ===== 3. معادلات لوغاريتمية خاصة =====
+    if 'log₂' in expression and '=' in expression:
+        steps = []
+        steps.append("📌 **السؤال:** " + expression)
+        steps.append("")
+        steps.append("📐 **الخطوة 1: نحول اللوغاريتم إلى الصيغة الأسية")
+        steps.append("   log₂(x) = 4  ⇒  x = 2⁴")
+        steps.append("")
+        steps.append("📐 **الخطوة 2: نحسب 2⁴ = 16")
+        steps.append("✅ **الإجابة النهائية:** x = 16")
+        return {"success": True, "steps": steps, "result": "x = 16"}
+    
+    if 'log(x²)' in expression or 'log(x^2)' in expression and '=' in expression:
+        steps = []
+        steps.append("📌 **السؤال:** " + expression)
+        steps.append("")
+        steps.append("📐 **الخطوة 1: نستخدم خاصية اللوغاريتم: log(x²) = 2 log(x)")
+        steps.append("   2 log(x) = 2")
+        steps.append("")
+        steps.append("📐 **الخطوة 2: نقسم على 2")
+        steps.append("   log(x) = 1")
+        steps.append("")
+        steps.append("📐 **الخطوة 3: نحول للصيغة الأسية")
+        steps.append("   x = 10¹ = 10")
+        steps.append("✅ **الإجابة النهائية:** x = 10")
+        return {"success": True, "steps": steps, "result": "x = 10"}
+    
+    # ===== 4. معادلات تكعيبية =====
+    if ('x³' in expression or 'x^3' in expression) and '=' in expression:
+        return solve_cubic_with_steps(expression)
+    
+    # ===== 5. معادلات رباعية ثنائية التربيع =====
+    if ('x⁴' in expression or 'x**4' in expression) and ('x²' in expression or 'x**2' in expression) and '=' in expression:
+        return solve_quartic_biquadratic_with_steps(expression)
+    
+    # ===== 6. معادلات جذرية =====
+    if '√' in expression and '=' in expression:
+        return solve_radical_with_steps(expression)
+    
+    # ===== 7. معادلات تربيعية =====
+    if ('x²' in expression or 'x^2' in expression) and '=' in expression:
+        return solve_quadratic_with_steps(expression)
+    
+    # ===== 8. معادلات خطية =====
+    if '=' in expression and 'x' in expression:
+        return solve_linear_with_steps(expression)
+    
+    # ===== 9. عمليات حسابية =====
+    try:
+        steps = []
+        steps.append(f"📌 **العملية:** {expression}")
+        steps.append("")
+        
+        result = calc.calculate(expression)
+        
+        steps.append(f"✅ **النتيجة:** {result}")
+        
+        return {
+            "success": True,
+            "steps": steps,
+            "result": str(result)
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "steps": [f"❌ حدث خطأ: {e}"],
+            "result": None
+        }
