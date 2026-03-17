@@ -2,7 +2,7 @@
 import logging
 import re
 import math
-from sympy import symbols, Eq, solve, sympify, N, diff, integrate, limit, oo, sin, cos, tan, exp, log
+from sympy import symbols, Eq, solve, sympify, N, diff, integrate, limit, oo, sin, cos, tan, exp, log, atan, asin, acos
 from calculator import Calculator
 
 logger = logging.getLogger(__name__)
@@ -658,6 +658,7 @@ def extract_function(expression: str):
     """استخراج الدالة من تعبير مثل 'مشتقة x^2' أو '∫ x^2 dx'"""
     # إزالة الكلمات المفتاحية
     expr = expression.lower()
+    expr = expr.replace('·', '*').replace('×', '*')
     expr = expr.replace('مشتقة', '').replace('derivative', '')
     expr = expr.replace('تكامل', '').replace('integral', '')
     expr = expr.replace('∫', '').replace('dx', '').replace('dy', '')
@@ -698,10 +699,17 @@ def solve_derivative_simple(expression: str) -> dict:
             steps.append("   • مشتقة sin(x) هي cos(x)")
         if func.has(cos):
             steps.append("   • مشتقة cos(x) هي -sin(x)")
-        if func.has(exp):
+        if func.has(exp) or str(func) == 'exp(x)':
             steps.append("   • مشتقة e^x هي e^x")
+            deriv = exp(x)
         if func.has(log):
             steps.append("   • مشتقة ln(x) هي 1/x")
+        if func.has(atan):
+            steps.append("   • مشتقة arctan(x) هي 1/(1+x²)")
+        if func.has(asin):
+            steps.append("   • مشتقة arcsin(x) هي 1/√(1-x²)")
+        if func.has(acos):
+            steps.append("   • مشتقة arccos(x) هي -1/√(1-x²)")
         
         steps.append("")
         steps.append(f"📐 **الخطوة 3: النتيجة**")
@@ -760,7 +768,7 @@ def solve_derivative_chain_rule(expression: str) -> dict:
             
             steps.append("")
             steps.append(f"📐 **الخطوة 3: التعويض**")
-            steps.append(f"   f'(x) = cos({format_expression(inner)}) × {format_expression(diff(inner, x))}")
+            steps.append(f"   f'(x) = cos({format_expression(inner)}) \\cdot {format_expression(diff(inner, x))}")
             
         elif func.has(exp) and not func.args[0] == x:
             inner = func.args[0]
@@ -777,7 +785,7 @@ def solve_derivative_chain_rule(expression: str) -> dict:
             
             steps.append("")
             steps.append(f"📐 **الخطوة 3: التعويض**")
-            steps.append(f"   f'(x) = e^{format_expression(inner)} × {format_expression(diff(inner, x))}")
+            steps.append(f"   f'(x) = e^{format_expression(inner)} \\cdot {format_expression(diff(inner, x))}")
             
         else:
             deriv = diff(func, x)
@@ -843,7 +851,7 @@ def solve_derivative_product_rule(expression: str) -> dict:
             
             steps.append("")
             steps.append("📐 **الخطوة 3: التعويض**")
-            steps.append(f"   f'(x) = ({format_expression(u_prime)})·({format_expression(v)}) + ({format_expression(u)})·({format_expression(v_prime)})")
+            steps.append(f"   f'(x) = ({format_expression(u_prime)}) \\cdot ({format_expression(v)}) + ({format_expression(u)}) \\cdot ({format_expression(v_prime)})")
             
         else:
             deriv = diff(func, x)
@@ -915,7 +923,7 @@ def solve_derivative_quotient_rule(expression: str) -> dict:
             
             steps.append("")
             steps.append("📐 **الخطوة 3: التعويض**")
-            steps.append(f"   f'(x) = (({format_expression(u_prime)})·({format_expression(denominator)}) - ({format_expression(numerator)})·({format_expression(v_prime)})) / ({format_expression(denominator)})²")
+            steps.append(f"   f'(x) = (({format_expression(u_prime)}) \\cdot ({format_expression(denominator)}) - ({format_expression(numerator)}) \\cdot ({format_expression(v_prime)})) / ({format_expression(denominator)})^2")
             
         else:
             deriv = diff(func, x)
@@ -960,7 +968,12 @@ def solve_integral_simple(expression: str) -> dict:
         if not func_str:
             func_str = expression
         
-        func = sympify(func_str)
+        try:
+            func = sympify(func_str)
+        except:
+            # محاولة معالجة الأقواس
+            func_str = func_str.replace('(', '').replace(')', '')
+            func = sympify(func_str)
         
         steps.append("📐 **الخطوة 1: كتابة التكامل**")
         steps.append(f"   ∫ {format_expression(func)} dx")
@@ -1076,9 +1089,15 @@ def solve_limit_simple(expression: str) -> dict:
         x = symbols('x')
         
         # محاولة استخراج الدالة وقيمة x
-        clean_expr = expression.replace('نهاية', '').replace('limit', '')
-        clean_expr = clean_expr.replace('عندما', '').replace('when', '')
-        clean_expr = clean_expr.replace('→', '->').replace('←', '->')
+        if 'عندما' in expression:
+            parts = expression.split('عندما')
+            func_part = parts[0].replace('نهاية', '').strip()
+            approach_part = parts[1].strip()
+            clean_expr = func_part + '->' + approach_part
+        else:
+            clean_expr = expression.replace('نهاية', '').replace('limit', '')
+            clean_expr = clean_expr.replace('عندما', '').replace('when', '')
+            clean_expr = clean_expr.replace('→', '->').replace('←', '->')
         
         # استخراج نقطة التقارب
         approach = 0
